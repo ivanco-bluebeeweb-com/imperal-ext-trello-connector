@@ -1,0 +1,174 @@
+"""Credential pairs, account listing, and name -> id resolution.
+
+The pair is the whole point of this layer: everything here exists because Trello
+access is `key` + `token` and a half-line is not an account.
+"""
+
+import accounts as acct
+import trello_client as tc
+from conftest import (TEST_KEY, TEST_TOKEN, board_payload, card_payload,
+                      list_payload, member_payload)
+
+
+# --- pair parsing -----------------------------------------------------------
+
+def test_pair_is_split_on_first_colon_only():
+    pairs = acct.split_pairs(f"{TEST_KEY}:{TEST_TOKEN}")
+    assert pairs == [(TEST_KEY, TEST_TOKEN)]
+
+
+def test_multiple_pairs_one_per_line():
+    raw = f"{TEST_KEY}:{TEST_TOKEN}\n{'c' * 32}:{'d' * 64}"
+    assert len(acct.split_pairs(raw)) == 2
+
+
+def test_blank_lines_do_not_create_phantom_accounts():
+    raw = f"\n\n{TEST_KEY}:{TEST_TOKEN}\n\n"
+    assert len(acct.split_pairs(raw)) == 1
+
+
+def test_duplicate_pair_is_not_two_accounts():
+    raw = f"{TEST_KEY}:{TEST_TOKEN}\n{TEST_KEY}:{TEST_TOKEN}"
+    assert len(acct.split_pairs(raw)) == 1
+
+
+def test_half_line_is_dropped_not_half_accepted():
+    """A key with no token cannot authorise anything -- keeping it would show a
+    broken line as if it were an account."""
+    assert acct.split_pairs(TEST_KEY) == []
+    assert acct.split_pairs(f"{TEST_KEY}:") == []
+    assert acct.split_pairs(f":{TEST_TOKEN}") == []
+
+
+def test_join_round_trips():
+    pairs = [(TEST_KEY, TEST_TOKEN)]
+    assert acct.split_pairs(acct.join_pairs(pairs)) == pairs
+
+
+# --- describe / connect -----------------------------------------------------
+
+async def test_describe_pair_names_the_account(ctx, http):
+    http.push(member_payload())
+    out = await acct.describe_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is True
+    assert out["member_name"] == "Vlad Ivanco"
+    assert out["username"] == "vladivanco"
+
+
+async def test_describe_pair_reports_rejection_without_leaking(ctx, http):
+    http.push("invalid token", status=401)
+    out = await acct.describe_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is False
+    assert TEST_TOKEN not in str(out)
+
+
+async def test_add_pair_stores_and_reports_boards(ctx, http):
+    http.push(member_payload())                    # validate
+    http.push([board_payload(name="Client Work")])  # boards
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is True
+    assert out["member_name"] == "Vlad Ivanco"
+    stored = await ctx.secrets.get(acct.SECRET_NAME)
+    assert TEST_KEY in stored and TEST_TOKEN in stored
+
+
+async def test_add_pair_refuses_a_credential_that_does_not_work(ctx, http):
+    """Storing a bad pair would turn one clear failure into a silent one later."""
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is False
+    stored = await ctx.secrets.get(acct.SECRET_NAME)
+    assert not stored
+
+
+async def test_add_pair_is_idempotent(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload()])
+    out = await acct.add_pair(connected_ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is True
+    assert out.get("already_connected") is True
+    stored = await connected_ctx.secrets.get(acct.SECRET_NAME)
+    assert stored.count(TEST_KEY) == 1
+
+
+# --- board resolution -------------------------------------------------------
+
+async def test_single_board_resolves_without_being_named(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload(name="Client Work")])
+    out = await acct.resolve_board(connected_ctx, "")
+    assert out["ok"] is True
+    assert out["board"]["name"] == "Client Work"
+
+
+async def test_board_matched_by_name(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload(board_id="6a" + "2" * 22, name="Client Work"),
+               board_payload(board_id="6b" + "3" * 22, name="Personal")])
+    out = await acct.resolve_board(connected_ctx, "Personal")
+    assert out["ok"] is True
+    assert out["board"]["name"] == "Personal"
+
+
+async def test_ambiguous_board_name_refuses_to_guess(connected_ctx, http):
+    """Picking one and then WRITING to it is the expensive kind of wrong."""
+    http.push(member_payload())
+    http.push([board_payload(board_id="6a" + "2" * 22, name="Client Work"),
+               board_payload(board_id="6b" + "3" * 22, name="Client Work")])
+    out = await acct.resolve_board(connected_ctx, "Client Work")
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_BOARD_AMBIGUOUS
+
+
+async def test_unknown_board_lists_what_exists(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload(name="Client Work")])
+    out = await acct.resolve_board(connected_ctx, "Nonexistent")
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_BOARD_UNKNOWN
+    assert "Client Work" in out["error"]
+
+
+async def test_no_credentials_says_so_clearly(ctx, http):
+    out = await acct.resolve_board(ctx, "")
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_CREDENTIALS_MISSING
+
+
+# --- target resolution ------------------------------------------------------
+
+async def test_target_id_is_passed_through_without_a_lookup(connected_ctx, http):
+    """Pasting an id out of a Trello URL must keep working."""
+    card_id = "8d" + "5" * 22
+    out = await acct.resolve_target(connected_ctx, TEST_KEY, TEST_TOKEN,
+                                    "6a" + "2" * 22, card_id, kind="card")
+    assert out["ok"] is True
+    assert out["id"] == card_id
+    assert http.calls == []
+
+
+async def test_target_resolved_by_name(connected_ctx, http):
+    http.push([list_payload(name="To Do"), list_payload(
+        list_id="7d" + "5" * 22, name="Done")])
+    out = await acct.resolve_target(connected_ctx, TEST_KEY, TEST_TOKEN,
+                                    "6a" + "2" * 22, "Done", kind="list")
+    assert out["ok"] is True
+    assert out["name"] == "Done"
+
+
+async def test_ambiguous_target_refuses(connected_ctx, http):
+    http.push([card_payload(card_id="8d" + "5" * 22, name="Ship it"),
+               card_payload(card_id="8e" + "6" * 22, name="Ship it")])
+    out = await acct.resolve_target(connected_ctx, TEST_KEY, TEST_TOKEN,
+                                    "6a" + "2" * 22, "Ship it", kind="card")
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_TARGET_AMBIGUOUS
+
+
+async def test_missing_target_names_the_alternatives(connected_ctx, http):
+    http.push([list_payload(name="To Do")])
+    out = await acct.resolve_target(connected_ctx, TEST_KEY, TEST_TOKEN,
+                                    "6a" + "2" * 22, "Backlog", kind="list")
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_TARGET_NOT_FOUND
+    assert "To Do" in out["error"]
