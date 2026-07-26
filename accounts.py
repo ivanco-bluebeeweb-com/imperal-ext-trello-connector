@@ -157,6 +157,52 @@ async def fetch_boards(ctx, key: str, token: str) -> dict:
     return {"ok": True, "boards": boards}
 
 
+def _shape_complaint(key: str, token: str):
+    """Catch the two paste mistakes the admin page invites, before spending a call.
+
+    `trello.com/apps/admin` shows a 32-hex **API Key** and a 64-hex **Secret**
+    side by side, and the Secret is NOT the token -- the token comes from a
+    separate authorise prompt. So two wrong pastes are common and both end in
+    Trello's flat "invalid key", which sends the user back to re-copy a key that
+    was never the problem:
+
+      * the Secret pasted into the key field (64 hex where 32 belongs), and
+      * the halves swapped (long value in key, short one in token).
+
+    Both are decidable from the strings alone, so they are named here rather
+    than after a round trip. Deliberately CONSERVATIVE: it only complains when
+    the shape is unambiguous, because Trello has changed credential formats
+    before and a strict validator that outlives its assumptions would reject
+    working credentials. Anything it is not sure about goes to Trello, whose
+    verdict remains the authority.
+    """
+    key_hex = all(c in "0123456789abcdefABCDEF" for c in key)
+    token_hex = all(c in "0123456789abcdefABCDEF" for c in token)
+
+    # Halves swapped: the key field holds a token-length value AND the token
+    # field holds a key-length one. Both conditions together, so a single
+    # oddly-sized value is not mistaken for a swap.
+    if len(key) == 64 and len(token) == 32 and key_hex and token_hex:
+        return tc.fail(
+            tc.TRELLO_KEY_REJECTED,
+            "These look swapped: the API key is the SHORTER value (32 "
+            "characters) and it belongs in the key field. Put the longer value "
+            "in the token field, or generate a fresh token beside the key at "
+            "trello.com/apps/admin.")
+
+    # The Secret pasted as the key. The Secret is for OAuth signing and will
+    # never authorise a REST call, so no amount of retrying helps.
+    if len(key) == 64 and key_hex:
+        return tc.fail(
+            tc.TRELLO_KEY_REJECTED,
+            "That is 64 characters long, which is the Secret shown next to the "
+            "API key -- not the key itself. The API key is the 32-character "
+            "value on the API Key tab of your Power-Up at "
+            "trello.com/apps/admin. The Secret is never used here.")
+
+    return None
+
+
 async def add_pair(ctx, key: str, token: str) -> dict:
     """Validate a credential pair against Trello, then store it.
 
@@ -181,6 +227,10 @@ async def add_pair(ctx, key: str, token: str) -> dict:
         return tc.fail(tc.TRELLO_KEY_MISSING)
     if not token:
         return tc.fail(tc.TRELLO_TOKEN_MISSING)
+
+    shape = _shape_complaint(key, token)
+    if shape:
+        return shape
 
     # Trello's own verdict first -- identifies the account as a side effect.
     info = await describe_pair(ctx, key, token)

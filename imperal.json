@@ -3228,6 +3228,7 @@
   "signals": [],
   "schedules": [],
   "required_scopes": [],
+  "icon_size_bytes": 291,
   "lifecycle": {
     "on_install": true,
     "health_check": {

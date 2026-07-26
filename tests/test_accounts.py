@@ -172,3 +172,51 @@ async def test_missing_target_names_the_alternatives(connected_ctx, http):
     assert out["ok"] is False
     assert out["code"] == tc.TRELLO_TARGET_NOT_FOUND
     assert "To Do" in out["error"]
+
+
+# --- paste-shape pre-flight -------------------------------------------------
+# The admin page shows a 32-hex API key and a 64-hex Secret side by side, so
+# these two mistakes are common and both end in Trello's flat "invalid key".
+
+async def test_secret_pasted_as_key_is_named_not_forwarded(ctx, http):
+    """A 64-hex key is the Secret: say so instead of asking Trello."""
+    out = await acct.add_pair(ctx, "c" * 64, TEST_TOKEN)
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_KEY_REJECTED
+    assert "secret" in out["error"].lower()
+    # Decidable from the string, so no request is spent reaching that verdict.
+    assert http.calls == []
+
+
+async def test_swapped_halves_are_named(ctx, http):
+    out = await acct.add_pair(ctx, "c" * 64, "d" * 32)
+    assert out["ok"] is False
+    assert "swap" in out["error"].lower()
+    assert http.calls == []
+
+
+async def test_nothing_is_stored_when_the_shape_is_wrong(ctx, http):
+    await acct.add_pair(ctx, "c" * 64, TEST_TOKEN)
+    assert await ctx.secrets.get("trello_credentials") in (None, "")
+
+
+async def test_a_correct_pair_still_reaches_trello(ctx, http):
+    """The guard must not become a gate: a normal pair passes through.
+
+    This is the test that matters most -- a shape check that outlives Trello's
+    format would reject working credentials, so the happy path is pinned.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is True
+    assert http.calls != []
+
+
+async def test_an_unfamiliar_shape_defers_to_trello(ctx, http):
+    """Not-obviously-wrong values are Trello's call, not ours."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    out = await acct.add_pair(ctx, "abc123xyz", "some-token-value")
+    assert out["ok"] is True
+    assert http.calls != []
