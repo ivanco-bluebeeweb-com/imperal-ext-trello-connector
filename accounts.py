@@ -507,6 +507,12 @@ async def list_accounts(ctx, *, refresh: bool = False) -> list[dict]:
         if hit and hit.get("member_name"):
             entry = dict(hit)
             entry["slot"] = index
+            # MARK THE ROW AS CACHED so callers can tell a remembered answer
+            # from a fresh one. Without this the resolver cannot know whether
+            # re-reading would tell it anything new, and either never retries
+            # (missing real boards) or always retries (a wasted round trip on
+            # every genuine miss).
+            entry["from_cache"] = True
             out.append(entry)
             continue
 
@@ -652,6 +658,28 @@ async def resolve_board(ctx, name: str = "") -> dict:
     exact = [r for r in rows if str(r.get("name", "")).strip().lower() == lowered]
     partial = [r for r in rows if lowered in str(r.get("name", "")).strip().lower()]
     matches = exact or partial
+
+    if not matches:
+        # NOT FOUND IN THE CACHE IS NOT THE SAME AS NOT EXISTING. The board list
+        # is cached, so anything created since the last read is invisible here:
+        # a board made in the Trello UI, by a teammate, or by this connector
+        # before cache invalidation was added. Refusing on a stale list told the
+        # user a board they were looking at did not exist -- verified live, where
+        # a freshly copied board resolved as "no reachable board matches".
+        #
+        # The re-read happens ONLY when the answer came from the cache and ONLY
+        # on the miss path: a live list is already authoritative, so retrying it
+        # would just ask Trello the same question twice.
+        if any(a.get("from_cache") for a in accounts):
+            fresh = await list_accounts(ctx, refresh=True)
+            fresh_rows = flatten_boards(fresh)
+            exact = [r for r in fresh_rows
+                     if str(r.get("name", "")).strip().lower() == lowered]
+            partial = [r for r in fresh_rows
+                       if lowered in str(r.get("name", "")).strip().lower()]
+            matches = exact or partial
+            if matches:
+                rows = fresh_rows
 
     if not matches:
         names = ", ".join(r.get("name", "?") for r in rows) or "-"

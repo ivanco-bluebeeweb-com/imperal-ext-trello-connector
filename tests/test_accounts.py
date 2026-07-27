@@ -455,3 +455,71 @@ async def test_no_doubled_token_word_survives(ctx, http):
     http.push("<html>Allow</html>", status=200)
     out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
     assert "'Token' 'Token'" not in out["error"]
+
+
+# --- stale cache on the miss path -------------------------------------------
+# The board list is cached, so "not in the list" and "does not exist" are
+# different facts. Conflating them is what a live call caught: a board copied
+# seconds earlier resolved as "No reachable Trello board matches" while the
+# board sat in Trello, plainly visible in the UI.
+
+async def _seed_cache(ctx, boards):
+    """Pretend a previous call cached this board list for slot 0."""
+    await ctx.store.create("accounts", {
+        "slot": 0,
+        "member_name": "Vlad Ivanco",
+        "member_id": "5f" + "1" * 22,
+        "username": "vladivanco",
+        "email": "vlad@bluebeeweb.com",
+        "boards": boards,
+        "status": "ok",
+    })
+
+
+async def test_board_missing_from_a_stale_cache_is_found_by_re_reading(
+        connected_ctx, http):
+    """A board created since the last read must still resolve.
+
+    The cache knows only 'Client Work'. 'Fresh Board' exists in Trello. The
+    resolver has to notice its list is a REMEMBERED one and check before
+    telling the user their board does not exist.
+    """
+    await _seed_cache(connected_ctx, [board_payload(name="Client Work")])
+    # The re-read: identify the pair again, then the true board list.
+    http.push(member_payload())
+    http.push([board_payload(name="Client Work"),
+               board_payload(board_id="6c" + "4" * 22, name="Fresh Board")])
+    out = await acct.resolve_board(connected_ctx, "Fresh Board")
+    assert out["ok"] is True
+    assert out["board"]["name"] == "Fresh Board"
+
+
+async def test_a_genuinely_absent_board_still_refuses_after_re_reading(
+        connected_ctx, http):
+    """The retry must not turn a real miss into a hang or a wrong board."""
+    await _seed_cache(connected_ctx, [board_payload(name="Client Work")])
+    http.push(member_payload())
+    http.push([board_payload(name="Client Work")])
+    out = await acct.resolve_board(connected_ctx, "Nonexistent")
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_BOARD_UNKNOWN
+    assert "Client Work" in out["error"]
+
+
+async def test_a_live_list_is_not_fetched_twice(connected_ctx, http):
+    """A fresh list is already authoritative -- retrying asks Trello twice.
+
+    With no cache seeded, the first read IS live, so the miss path must not ask
+    again. The assertion COUNTS requests rather than checking the queue is
+    empty: a retry whose responses are not queued fails inside the account
+    layer, which swallows it and returns an empty list, leaving the queue empty
+    and the test passing for the wrong reason. Sabotage proved that weaker
+    version green -- so the count is the assertion that actually bites.
+    """
+    http.push(member_payload())
+    http.push([board_payload(name="Client Work")])
+    out = await acct.resolve_board(connected_ctx, "Nonexistent")
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_BOARD_UNKNOWN
+    # Exactly two: identify the pair, list its boards. Not four.
+    assert len(http.calls) == 2, f"expected 2 requests, got {len(http.calls)}"
