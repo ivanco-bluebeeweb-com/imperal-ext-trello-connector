@@ -50,8 +50,20 @@ ext = Extension(
     description=(
         "Read and operate on Trello: browse boards, lists and cards, read card "
         "details, checklists and comments, create and update cards, move them "
-        "between lists and boards, manage labels, members and due dates, and "
-        "comment -- across multiple Trello accounts."
+        "between lists and boards, manage labels, members, custom fields, "
+        "stickers and due dates, copy boards and cards, move whole lists "
+        "between boards, manage workspaces and their members, and read board "
+        "activity and notifications -- across multiple Trello accounts."
+        "\n\n"
+        "TWO HONEST LIMITS, both established against the live API rather than "
+        "assumed. Attachments are LINK-ONLY: Trello accepts file uploads solely "
+        "as multipart/form-data, which this connector does not send, so a URL "
+        "can be attached and a local file cannot. And Trello CANNOT PUSH "
+        "changes here: its webhooks require a publicly reachable callback URL "
+        "that answers Trello's own verification, which an extension does not "
+        "have -- so board changes are seen when something asks, never announced. "
+        "Anything depending on 'tell me when a card moves' needs a schedule, "
+        "not a subscription."
     ),
     icon="icon.svg",
     actions_explicit=True,
@@ -63,7 +75,10 @@ chat = ChatExtension(
     description=(
         "Trello Connector -- find and read Trello boards, lists and cards, "
         "create and update cards, move or archive them, and manage comments, "
-        "labels, members, checklists and due dates."
+        "labels, members, checklists, custom fields, stickers, votes, "
+        "workspaces and due dates. Reads board activity and notifications. "
+        "Attachments are links only, and Trello cannot notify this app of "
+        "changes -- ask and it looks; it is never told."
     ),
 )
 
