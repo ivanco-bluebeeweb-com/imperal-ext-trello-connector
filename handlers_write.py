@@ -1889,6 +1889,11 @@ async def create_custom_field(ctx, params: CreateCustomFieldParams) -> ActionRes
         "modelType": "board",
         "name": params.name,
         "type": resolved,
+        # `pos` is REQUIRED by POST /customFields -- the spec lists it beside
+        # idModel and name, and omitting it failed the live call. It was easy to
+        # miss because every other create in this connector defaults position
+        # server-side; custom fields do not.
+        "pos": "bottom",
         "display_cardFront": "true" if params.show_on_card else "false",
     }
     if resolved == "list":

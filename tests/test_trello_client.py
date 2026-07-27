@@ -136,3 +136,36 @@ async def test_paginate_rejects_non_list_response(ctx, http):
     out = await tc.paginate(ctx, "boards/abc/cards", CREDS, limit=10)
     assert out["ok"] is False
     assert out["code"] == tc.TRELLO_RESPONSE_UNEXPECTED
+
+
+async def test_unclassified_4xx_echoes_trellos_own_reason(ctx, http):
+    """A status outside the known set must not swallow the explanation.
+
+    This is a REGRESSION TEST for a live failure: creating a custom field came
+    back as the bare "The Trello request failed." because the status was not
+    400/401/403/404/429, so it fell into the generic bucket where Trello's text
+    was discarded. The reason it returned -- one required field missing -- was
+    sitting in the body, and finding it cost a dig through the API spec.
+    """
+    http.push("value not valid for pos", status=422)
+    out = await tc.request(ctx, "POST", "customFields", CREDS,
+                           data={"name": "Priority"})
+    assert out["ok"] is False
+    assert out["code"] == tc.TRELLO_HTTP_ERROR
+    # The actionable part -- what Trello objected to -- survives.
+    assert "pos" in out["error"]
+    assert "422" in out["error"]
+
+
+async def test_auth_failures_still_withhold_the_raw_text(ctx, http):
+    """Echoing detail is for FIXABLE errors, not for auth.
+
+    On a 401 the curated explanation (re-paste vs re-authorise) is more useful
+    than Trello's terse text, and pasting raw auth strings back at the user
+    risks surfacing token fragments. The widened echo must not have leaked into
+    this path.
+    """
+    http.push("invalid token", status=401)
+    out = await tc.request(ctx, "GET", "boards/abc", CREDS)
+    assert out["ok"] is False
+    assert "invalid token" not in out["error"].lower()

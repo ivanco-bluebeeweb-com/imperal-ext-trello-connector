@@ -258,12 +258,17 @@ def classify(status_code: int, body) -> tuple[str, str]:
         code = TRELLO_HTTP_ERROR
 
     message = _MESSAGES.get(code) or f"Trello request failed (HTTP {status_code})."
-    # Trello's own text is echoed ONLY for validation errors: there it names
-    # the offending field ("invalid value for idList"), which is exactly what
-    # makes the failure fixable. It is not echoed for auth failures, where the
-    # curated explanation is better and the raw text adds nothing actionable.
-    if code == TRELLO_VALIDATION_FAILED and detail:
-        message = f"Trello rejected the request: {detail}"
+    # Trello's own text is echoed for validation errors AND for the generic
+    # bucket: there it names the offending field ("invalid value for idList",
+    # "pos is required"), which is exactly what makes the failure fixable. It is
+    # still withheld for auth failures, where the curated explanation is better
+    # and the raw text adds nothing actionable.
+    #
+    # The generic case was added after a live 4xx that is not 400/401/403/404/429
+    # surfaced as the bare "The Trello request failed." -- true, useless, and it
+    # cost a spec dig to find that one required field was missing.
+    if code in (TRELLO_VALIDATION_FAILED, TRELLO_HTTP_ERROR) and detail:
+        message = f"Trello rejected the request (HTTP {status_code}): {detail}"
     return code, message
 
 
