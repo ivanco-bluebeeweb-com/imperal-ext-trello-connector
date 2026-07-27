@@ -12,13 +12,19 @@ BEFORE anything is written, so a typo fails without leaving a half-made card.
 """
 
 import handlers_write as hw
-from conftest import (TEST_KEY, TEST_TOKEN, board_payload, card_payload,
-                      code_of, list_payload, member_payload, succeeded,
-                      text_of_result)
-from models import (AddCommentParams, ArchiveCardParams, CardLabelsParams,
-                    CardMembersParams, ConnectAccountParams, CreateCardParams,
-                    CreateListParams, DeleteCardParams, MoveCardParams,
-                    UpdateCardParams)
+from conftest import (TEST_KEY, TEST_TOKEN, attachment_payload, board_payload,
+                      card_payload, checklist_payload, code_of, label_payload,
+                      list_payload, member_payload, succeeded, text_of_result)
+from models import (AddAttachmentParams, AddCheckItemParams, AddCommentParams,
+                    ArchiveCardParams, BoardMemberParams, CardLabelsParams,
+                    CardMembersParams, ConnectAccountParams, CopyCardParams,
+                    CreateCardParams, CreateLabelParams, CreateListParams,
+                    DeleteAttachmentParams, DeleteBoardParams, DeleteCardParams,
+                    DeleteCheckItemParams, DeleteChecklistParams,
+                    DeleteCommentParams, DeleteLabelParams, EditCommentParams,
+                    ListBulkParams, MoveCardParams, UpdateBoardParams,
+                    UpdateCardParams, UpdateChecklistParams, UpdateLabelParams,
+                    UpdateListParams)
 
 
 # --- connect ----------------------------------------------------------------
@@ -319,3 +325,347 @@ async def test_empty_label_list_costs_nothing(connected_ctx, http):
         card="Fix hero", labels=""))
     assert succeeded(result) is False
     assert http.calls == []
+
+
+# --- attachments ------------------------------------------------------------
+# Only links are attachable: the shared client sends JSON, and a file upload is
+# multipart. A `file` parameter would accept a path it could never deliver.
+
+async def test_attachment_url_rides_in_the_query(connected_ctx, http):
+    """Trello takes the URL as a query parameter on this route."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push(attachment_payload())
+    result = await hw.add_attachment(connected_ctx, AddAttachmentParams(
+        card="Fix hero", url="https://example.dev/brief.pdf", name="Brief"))
+    assert succeeded(result) is True
+    assert http.last_path().endswith("/attachments")
+    assert http.last_params().get("url") == "https://example.dev/brief.pdf"
+    assert http.last_params().get("name") == "Brief"
+
+
+async def test_attachment_without_a_url_is_refused_before_the_call(
+        connected_ctx, http):
+    """No URL is knowably invalid from the parameters alone."""
+    result = await hw.add_attachment(connected_ctx, AddAttachmentParams(
+        card="Fix hero", url="   "))
+    assert succeeded(result) is False
+    assert http.calls == []
+
+
+async def test_deleting_an_attachment_says_whether_it_was_an_upload(
+        connected_ctx, http):
+    """An upload is the only copy; a link is a reference. The wording differs.
+
+    Reporting both as "removed attachment" hides that one of them destroyed
+    data Trello was storing.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([attachment_payload(name="Brief.pdf", is_upload=True)])
+    http.push({})
+    result = await hw.delete_attachment(connected_ctx, DeleteAttachmentParams(
+        card="Fix hero", attachment="Brief.pdf"))
+    assert succeeded(result) is True
+    assert http.last_method() == "DELETE"
+    text = text_of_result(result).lower()
+    assert "upload" in text or "stored" in text
+
+
+# --- checklists -------------------------------------------------------------
+
+async def test_add_check_item_finds_the_only_checklist(connected_ctx, http):
+    """`checklist` may be omitted when the card has exactly one.
+
+    Requiring it would be asking for information the card already determines.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([checklist_payload()])                  # resolve_checklist
+    http.push({"id": "f4" + "c" * 22, "name": "Ship it"})
+    result = await hw.add_check_item(connected_ctx, AddCheckItemParams(
+        card="Fix hero", item="Ship it"))
+    assert succeeded(result) is True
+    assert http.last_path().endswith("/checkItems")
+
+
+async def test_add_check_item_refuses_to_guess_between_checklists(
+        connected_ctx, http):
+    """Two checklists and no name: refuse, do not pick.
+
+    Appending to the wrong checklist is a silent misfile -- the item exists, so
+    nothing looks broken, and it is on the wrong list forever.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([checklist_payload(name="Launch steps"),
+               checklist_payload(checklist_id="a1" + "2" * 22, name="QA")])
+    result = await hw.add_check_item(connected_ctx, AddCheckItemParams(
+        card="Fix hero", item="Ship it"))
+    assert succeeded(result) is False
+    text = text_of_result(result).lower()
+    # The refusal has to NAME them, or the user cannot act on it.
+    assert "launch steps" in text and "qa" in text
+
+
+async def test_delete_check_item_addresses_it_under_the_card(
+        connected_ctx, http):
+    """Trello deletes a check item at cards/{id}/checkItem/{itemId}."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([checklist_payload()])                  # resolve_check_item
+    http.push({"limits": {}})
+    result = await hw.delete_check_item(connected_ctx, DeleteCheckItemParams(
+        card="Fix hero", item="Add images"))
+    assert succeeded(result) is True
+    assert http.last_method() == "DELETE"
+    assert "/checkItem/" in http.last_path()
+
+
+async def test_delete_checklist_says_its_items_go_too(connected_ctx, http):
+    """Deleting a checklist takes its items; the result must say so."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([checklist_payload()])
+    http.push({"limits": {}})
+    result = await hw.delete_checklist(connected_ctx, DeleteChecklistParams(
+        card="Fix hero", checklist="Launch steps"))
+    assert succeeded(result) is True
+    assert http.last_method() == "DELETE"
+    text = text_of_result(result).lower()
+    assert "item" in text
+
+
+# --- lists (columns) --------------------------------------------------------
+
+async def test_update_list_refuses_an_empty_change(connected_ctx, http):
+    """An empty PUT would report success while changing nothing."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([list_payload(name="Today")])
+    result = await hw.update_list(connected_ctx, UpdateListParams(
+        list_name="Today"))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_VALIDATION_FAILED"
+
+
+async def test_move_all_cards_sends_both_board_and_list(connected_ctx, http):
+    """Trello needs idBoard AND idList, even within one board."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([list_payload(name="Today")])                        # source
+    http.push([list_payload(list_id="7c" + "9" * 22, name="Done")])  # dest
+    http.push([card_payload()])
+    result = await hw.move_all_cards(connected_ctx, ListBulkParams(
+        list_name="Today", to_list="Done"))
+    assert succeeded(result) is True
+    sent = http.last_params()
+    assert sent.get("idList")
+    assert sent.get("idBoard")
+
+
+async def test_archive_all_cards_reports_it_is_reversible(connected_ctx, http):
+    """Archiving is not deleting, and the difference must be visible."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([list_payload(name="Today")])
+    http.push({"limits": {}})
+    result = await hw.archive_all_cards(connected_ctx, ListBulkParams(
+        list_name="Today"))
+    assert succeeded(result) is True
+    assert http.last_path().endswith("/archiveAllCards")
+
+
+# --- labels -----------------------------------------------------------------
+
+async def test_create_label_belongs_to_the_board(connected_ctx, http):
+    """A Trello label is board-level: created with idBoard, not on a card."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push(label_payload(name="Blocked", color="orange"))
+    result = await hw.create_label(connected_ctx, CreateLabelParams(
+        name="Blocked", color="orange"))
+    assert succeeded(result) is True
+    assert http.last_path().endswith("labels")
+    assert http.last_body().get("idBoard") or http.last_params().get("idBoard")
+
+
+async def test_delete_label_warns_it_leaves_every_card(connected_ctx, http):
+    """Deleting a label strips it from every card that had it."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([label_payload(name="Urgent")])
+    http.push({"limits": {}})
+    result = await hw.delete_label(connected_ctx, DeleteLabelParams(
+        label="Urgent"))
+    assert succeeded(result) is True
+    text = text_of_result(result).lower()
+    assert "every card" in text or "all cards" in text or "card" in text
+
+
+# --- boards -----------------------------------------------------------------
+
+async def test_delete_board_requires_confirmation(connected_ctx, http):
+    """Without confirm=true, nothing is sent at all.
+
+    A board deletion destroys every list, card and comment on it and Trello
+    offers no undo. The gate must fire BEFORE any request, so a mistyped board
+    name cannot even begin.
+    """
+    result = await hw.delete_board(connected_ctx, DeleteBoardParams(
+        board="Client Work", confirm=False))
+    assert succeeded(result) is False
+    # Not one request spent: no lookup, no delete.
+    assert http.calls == []
+    text = text_of_result(result).lower()
+    assert "confirm" in text
+
+
+async def test_update_board_refuses_an_empty_change(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload()])
+    result = await hw.update_board(connected_ctx, UpdateBoardParams(
+        board="Client Work"))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_VALIDATION_FAILED"
+
+
+async def test_closing_a_board_is_described_as_reversible(connected_ctx, http):
+    """Closing keeps everything; the wording must not read like deletion."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push(board_payload(closed=True))
+    result = await hw.update_board(connected_ctx, UpdateBoardParams(
+        board="Client Work", closed=True))
+    assert succeeded(result) is True
+    assert http.last_method() == "PUT"
+
+
+async def test_board_member_role_is_sent_as_type(connected_ctx, http):
+    """Trello names the role parameter `type`, not `role`."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push({"id": "6a" + "2" * 22})
+    result = await hw.set_board_member(connected_ctx, BoardMemberParams(
+        board="Client Work", member="teammate@example.dev", role="normal"))
+    assert succeeded(result) is True
+    assert http.last_method() == "PUT"
+    sent = {**http.last_params(), **http.last_body()}
+    assert sent.get("type") == "normal"
+
+
+# --- copy -------------------------------------------------------------------
+
+async def test_copy_card_sends_the_source_id(connected_ctx, http):
+    """A copy is POST /cards with idCardSource -- not a card built by hand."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([list_payload(name="Today")])
+    http.push(card_payload(card_id="9a" + "1" * 22, name="Fix hero (copy)"))
+    result = await hw.copy_card(connected_ctx, CopyCardParams(
+        card="Fix hero", to_list="Today", name="Fix hero (copy)"))
+    assert succeeded(result) is True
+    sent = {**http.last_params(), **http.last_body()}
+    assert sent.get("idCardSource")
+
+
+async def test_add_check_item_refuses_an_ambiguous_checklist_NAME(
+        connected_ctx, http):
+    """A NAMED checklist that matches two is refused as well.
+
+    Separate from the omitted-name case above: that one is refused by the
+    "which of the card's checklists" branch, this one by the name matcher. The
+    first test passed while the name matcher was silently taking the first of
+    two matches, so the two branches need their own tests -- one green test does
+    not cover a refusal it never reaches.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([checklist_payload(name="Launch steps"),
+               checklist_payload(checklist_id="a1" + "2" * 22,
+                                 name="Launch QA")])
+    result = await hw.add_check_item(connected_ctx, AddCheckItemParams(
+        card="Fix hero", item="Ship it", checklist="Launch"))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_TARGET_AMBIGUOUS"
+    text = text_of_result(result).lower()
+    assert "launch steps" in text and "launch qa" in text
+
+
+# --- comments: editing and deleting ------------------------------------------
+# A comment is an ACTION. Its route is cards/{id}/actions/{idAction}/comments --
+# the same shape that `add_comment` got wrong once by posting to a comment
+# resource that does not exist, where the 404 read as "card not found".
+
+async def test_edit_comment_addresses_it_as_an_action(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push({"id": "ac" + "1" * 22, "data": {"text": "Revised"}})
+    result = await hw.edit_comment(connected_ctx, EditCommentParams(
+        card="Fix hero", comment_id="ac" + "1" * 22, text="Revised"))
+    assert succeeded(result) is True
+    path = http.last_path()
+    assert "/actions/" in path and path.endswith("/comments"), path
+    # The new text is a query parameter here, exactly as when posting one.
+    assert http.last_params().get("text") == "Revised"
+
+
+async def test_edit_comment_refuses_empty_text(connected_ctx, http):
+    """Empty text would blank the comment while reporting an edit."""
+    result = await hw.edit_comment(connected_ctx, EditCommentParams(
+        card="Fix hero", comment_id="ac" + "1" * 22, text="   "))
+    assert succeeded(result) is False
+    assert http.calls == []
+
+
+async def test_delete_comment_uses_the_action_route(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push({})
+    result = await hw.delete_comment(connected_ctx, DeleteCommentParams(
+        card="Fix hero", comment_id="ac" + "1" * 22))
+    assert succeeded(result) is True
+    assert http.last_method() == "DELETE"
+    assert "/actions/" in http.last_path()
+
+
+# --- renames ----------------------------------------------------------------
+
+async def test_update_checklist_renames_the_checklist_itself(
+        connected_ctx, http):
+    """PUT goes to the CHECKLIST, not to the card that holds it."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([checklist_payload()])
+    http.push({"id": "af" + "7" * 22, "name": "Launch steps v2"})
+    result = await hw.update_checklist(connected_ctx, UpdateChecklistParams(
+        card="Fix hero", checklist="Launch steps", name="Launch steps v2"))
+    assert succeeded(result) is True
+    assert http.last_method() == "PUT"
+    assert "/1/checklists/" in http.last_path(), http.last_path()
+
+
+async def test_update_label_can_change_colour_alone(connected_ctx, http):
+    """Recolouring without renaming must not blank the name."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([label_payload(name="Urgent", color="red")])
+    http.push(label_payload(name="Urgent", color="blue"))
+    result = await hw.update_label(connected_ctx, UpdateLabelParams(
+        label="Urgent", color="blue"))
+    assert succeeded(result) is True
+    body = http.last_body() or {}
+    assert body.get("color") == "blue"
+    # No empty name in the body: Trello would accept it and erase the label's.
+    assert "name" not in body or body["name"]

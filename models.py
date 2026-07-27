@@ -223,6 +223,170 @@ class CheckItemParams(BoardScoped):
         True, description="Set false to untick the item")
 
 
+# --- attachments ---
+# Trello attachments come in two shapes that share one endpoint: a URL, and an
+# uploaded file. Only the URL form is offered here. `POST /cards/{id}/attachments`
+# takes a file as multipart/form-data, and every request in this app goes through
+# one client that sends JSON -- so a `file` parameter would be a field that
+# accepts a path and then cannot deliver it. A named gap beats a broken promise.
+
+class ListAttachmentsParams(BoardScoped):
+    card: str = Field(..., description="Card whose attachments to read (name or id)")
+
+
+class AddAttachmentParams(BoardScoped):
+    card: str = Field(..., description="Card to attach to (name or id)")
+    url: str = Field(
+        ..., description="Link to attach, e.g. a Google Doc or an image URL")
+    name: str = Field(
+        "", description="Label for the link (defaults to the URL itself)")
+
+
+class DeleteAttachmentParams(BoardScoped):
+    card: str = Field(..., description="Card holding the attachment (name or id)")
+    attachment: str = Field(
+        ..., description="Attachment to remove, by its name or id")
+
+
+# --- comments ---
+
+class EditCommentParams(BoardScoped):
+    card: str = Field(..., description="Card holding the comment (name or id)")
+    comment_id: str = Field(
+        ..., description="Id of the comment to change -- from list_comments. A "
+                         "comment is an ACTION, so this is an action id.")
+    text: str = Field(..., description="Replacement comment text")
+
+
+class DeleteCommentParams(BoardScoped):
+    card: str = Field(..., description="Card holding the comment (name or id)")
+    comment_id: str = Field(
+        ..., description="Id of the comment to delete -- from list_comments.")
+
+
+# --- checklists ---
+
+class AddCheckItemParams(BoardScoped):
+    card: str = Field(..., description="Card holding the checklist (name or id)")
+    item: str = Field(..., description="Text of the item to add")
+    checklist: str = Field(
+        "", description="Which checklist to add to. Omit when the card has "
+                        "only one.")
+    position: str = Field(
+        "bottom", description="Where in the checklist: 'top' or 'bottom'")
+
+
+class DeleteCheckItemParams(BoardScoped):
+    card: str = Field(..., description="Card holding the checklist (name or id)")
+    item: str = Field(..., description="Text of the item to delete")
+
+
+class UpdateChecklistParams(BoardScoped):
+    card: str = Field(..., description="Card holding the checklist (name or id)")
+    checklist: str = Field(..., description="Checklist to rename (name or id)")
+    name: str = Field(..., description="New checklist title")
+
+
+class DeleteChecklistParams(BoardScoped):
+    card: str = Field(..., description="Card holding the checklist (name or id)")
+    checklist: str = Field(
+        ..., description="Checklist to delete (name or id). Its items go with "
+                         "it.")
+
+
+# --- lists (columns) ---
+
+class UpdateListParams(BoardScoped):
+    list_name: str = Field(..., description="List to change (name or id)")
+    name: str = Field("", description="New list name")
+    position: str = Field(
+        "", description="Move it: 'top', 'bottom' or a number")
+    subscribed: bool | None = Field(
+        None, description="Follow (true) or unfollow (false) this list")
+
+
+class ListBulkParams(BoardScoped):
+    list_name: str = Field(..., description="Source list (name or id)")
+    to_list: str = Field(
+        "", description="Destination list for a move. Omit when archiving.")
+    to_board: str = Field(
+        "", description="Destination board, when moving cards to another board")
+
+
+# --- boards ---
+
+class UpdateBoardParams(BaseModel):
+    """Not BoardScoped: the board is the OBJECT here, not the context.
+
+    `board` is required rather than optional, unlike BoardScoped's convenience
+    default. Renaming or closing a board is not something to do to whichever
+    board happened to be the only one reachable.
+    """
+    board: str = Field(..., description="Board to change (name or id)")
+    name: str = Field("", description="New board name")
+    desc: str = Field("", description="New board description")
+    closed: bool | None = Field(
+        None, description="Close/archive (true) or reopen (false) the board")
+
+
+class DeleteBoardParams(BaseModel):
+    """Deleting a board is permanent -- so the name is required, never inferred."""
+    board: str = Field(..., description="Board to delete permanently (name or id)")
+    confirm: bool = Field(
+        False, description="Must be true. Deleting a board destroys every list, "
+                           "card and comment on it, and Trello offers no undo.")
+
+
+class BoardMemberParams(BaseModel):
+    board: str = Field(..., description="Board to change (name or id)")
+    member: str = Field(
+        ..., description="Person to add or remove: email address, username, or "
+                         "a name already on the board")
+    role: str = Field(
+        "normal", description="'normal', 'admin' or 'observer'")
+    remove: bool = Field(
+        False, description="Set true to REMOVE this person from the board")
+
+
+# --- labels ---
+
+class CreateLabelParams(BoardScoped):
+    name: str = Field(..., description="Label text, e.g. 'Blocked'")
+    color: str = Field(
+        "green", description="Trello colour: green, yellow, orange, red, "
+                             "purple, blue, sky, lime, pink, black")
+
+
+class UpdateLabelParams(BoardScoped):
+    label: str = Field(..., description="Label to change (name, colour or id)")
+    name: str = Field("", description="New label text")
+    color: str = Field("", description="New colour")
+
+
+class DeleteLabelParams(BoardScoped):
+    label: str = Field(..., description="Label to delete (name, colour or id)")
+
+
+# --- cards ---
+
+class CopyCardParams(BoardScoped):
+    card: str = Field(..., description="Card to copy (name or id)")
+    name: str = Field("", description="Title for the copy (defaults to the original)")
+    to_list: str = Field(
+        "", description="List to put the copy in. Omit to copy beside the "
+                        "original.")
+    to_board: str = Field(
+        "", description="Copy onto a different board (name or id). The "
+                        "destination list must be named too, since lists "
+                        "belong to one board.")
+    position: str = Field(
+        "bottom", description="Where in the destination list: 'top' or 'bottom'")
+    keep: str = Field(
+        "all", description="What to carry over: 'all', 'none', or a "
+                           "comma-separated pick of checklists, attachments, "
+                           "comments, due, labels, members, stickers")
+
+
 # --------------------------- display base ---------------------------
 
 class _Displayable(sdl.Entity):
@@ -377,6 +541,25 @@ class TrelloChecklist(_Displayable):
 
 
 class TrelloChecklistList(sdl.EntityList[TrelloChecklist]):
+    pass
+
+
+class TrelloAttachment(_Displayable):
+    """One attachment on a card.
+
+    `is_upload` distinguishes a file Trello stores from a link that merely points
+    somewhere: deleting the first destroys the only copy, deleting the second
+    only removes a reference. That difference matters enough to be a field.
+    """
+    name: str = ""
+    url: str = ""
+    mime_type: str = ""
+    bytes_size: int = 0
+    is_upload: bool = False
+    created: str = ""
+
+
+class TrelloAttachmentList(sdl.EntityList[TrelloAttachment]):
     pass
 
 

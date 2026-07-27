@@ -285,3 +285,157 @@ async def resolve_label(ctx, creds, board_id: str, reference: str) -> dict:
                        f"'{reference}' matches several labels: {names}.")
     name, label_id = matches[0]
     return {"ok": True, "id": label_id, "name": name, "resolved_by": "name"}
+
+
+async def card_checklists(ctx, creds, card_id: str) -> dict:
+    """Read a card's checklists WITH their items.
+
+    One request serves both \"which checklist\" and \"which item\" questions, so
+    the callers below do not each fetch the same thing. `checkItems=all` is
+    required: without it Trello returns checklists as empty shells, and an item
+    search over them finds nothing while reporting no error.
+    """
+    return await tc.request(
+        ctx, "GET", f"cards/{card_id}/checklists", creds,
+        params={"checkItems": "all", "checkItem_fields": "name,state,pos",
+                "fields": "name,pos"})
+
+
+def _pick_one(matches: list[tuple], kind: str, reference: str,
+              available: list[str]) -> dict:
+    """Turn a match list into an envelope: exactly one hit, or an explanation.
+
+    Shared by the checklist and check-item resolvers because \"refuse to guess\"
+    has to be phrased identically wherever it happens -- a tool that silently
+    picks the first of two matches is how the wrong item gets ticked.
+    """
+    if not matches:
+        listing = ", ".join(a for a in available[:12] if a) or "-"
+        return tc.fail(
+            tc.TRELLO_TARGET_NOT_FOUND,
+            f"No {kind} matches '{reference}'. Available: {listing}.")
+    if len(matches) > 1:
+        names = ", ".join(str(m[1]) for m in matches[:6])
+        return tc.fail(
+            tc.TRELLO_TARGET_AMBIGUOUS,
+            f"'{reference}' matches several {kind}s: {names}. "
+            "Name one exactly, or pass its id.")
+    return {"ok": True, "id": matches[0][0], "name": matches[0][1],
+            "resolved_by": "name"}
+
+
+async def resolve_checklist(ctx, creds, card_id: str, reference: str) -> dict:
+    """Resolve a checklist on a card by name, or accept its id.
+
+    An EMPTY reference is allowed and resolves to the card's only checklist.
+    That is the common case -- most cards have one -- and demanding its name
+    would make `add_check_item` require a lookup the user should not have to do.
+    With several checklists present, emptiness is ambiguous and is refused.
+    """
+    ref = (reference or "").strip()
+    if to.looks_like_id(ref):
+        return {"ok": True, "id": ref, "name": "", "resolved_by": "id"}
+
+    out = await card_checklists(ctx, creds, card_id)
+    if not out.get("ok"):
+        return out
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+
+    if not ref:
+        if len(rows) == 1:
+            return {"ok": True, "id": to.id_of(rows[0]),
+                    "name": to.name_of(rows[0]), "resolved_by": "only-one"}
+        if not rows:
+            return tc.fail(tc.TRELLO_TARGET_NOT_FOUND,
+                           "This card has no checklists.")
+        names = ", ".join(to.name_of(r) for r in rows[:6])
+        return tc.fail(
+            tc.TRELLO_TARGET_AMBIGUOUS,
+            f"This card has several checklists: {names}. Name which one.")
+
+    lowered = ref.lower()
+    exact = [(to.id_of(r), to.name_of(r)) for r in rows
+             if to.name_of(r).strip().lower() == lowered]
+    partial = [(to.id_of(r), to.name_of(r)) for r in rows
+               if lowered in to.name_of(r).strip().lower()]
+    return _pick_one(exact or partial, "checklist", reference,
+                     [to.name_of(r) for r in rows])
+
+
+async def resolve_check_item(ctx, creds, card_id: str, reference: str) -> dict:
+    """Resolve a checklist ITEM on a card by its text.
+
+    Returns the item id plus the checklist it belongs to, because Trello
+    addresses an item under its CARD for updates but under its CHECKLIST for
+    deletion -- callers need both. An exact match always wins over a substring
+    one, so an item called \"Deploy\" stays reachable next to \"Deploy to prod\".
+    """
+    ref = (reference or "").strip()
+    if not ref:
+        return tc.fail(tc.TRELLO_VALIDATION_FAILED, "No checklist item was named.")
+
+    out = await card_checklists(ctx, creds, card_id)
+    if not out.get("ok"):
+        return out
+
+    lowered = ref.lower()
+    exact: list[tuple] = []
+    partial: list[tuple] = []
+    available: list[str] = []
+    for checklist in out.get("data") or []:
+        if not isinstance(checklist, dict):
+            continue
+        for item in checklist.get("checkItems") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            if not name:
+                continue
+            available.append(name)
+            entry = (to.id_of(item), name, to.id_of(checklist),
+                     to.name_of(checklist))
+            if name.strip().lower() == lowered:
+                exact.append(entry)
+            elif lowered in name.strip().lower():
+                partial.append(entry)
+
+    matches = exact or partial
+    picked = _pick_one(matches, "checklist item", reference, available)
+    if not picked.get("ok"):
+        return picked
+    winner = matches[0]
+    picked["checklist_id"] = winner[2]
+    picked["checklist_name"] = winner[3]
+    return picked
+
+
+async def resolve_attachment(ctx, creds, card_id: str, reference: str) -> dict:
+    """Resolve an attachment on a card by name, or accept its id."""
+    ref = (reference or "").strip()
+    if not ref:
+        return tc.fail(tc.TRELLO_VALIDATION_FAILED, "No attachment was named.")
+    if to.looks_like_id(ref):
+        return {"ok": True, "id": ref, "name": "", "resolved_by": "id"}
+
+    out = await tc.request(ctx, "GET", f"cards/{card_id}/attachments", creds,
+                           params={"fields": "name,url,isUpload"})
+    if not out.get("ok"):
+        return out
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+
+    lowered = ref.lower()
+    exact = [(to.id_of(r), to.name_of(r)) for r in rows
+             if to.name_of(r).strip().lower() == lowered]
+    partial = [(to.id_of(r), to.name_of(r)) for r in rows
+               if lowered in to.name_of(r).strip().lower()]
+    picked = _pick_one(exact or partial, "attachment", reference,
+                       [to.name_of(r) for r in rows])
+    # Carry `isUpload` out with the match. The field was requested but dropped
+    # here, so the caller could not tell a stored file from a link -- and the
+    # deletion of the two is not the same act: one destroys the only copy.
+    if picked.get("ok"):
+        for r in rows:
+            if to.id_of(r) == picked["id"]:
+                picked["is_upload"] = bool(r.get("isUpload"))
+                break
+    return picked

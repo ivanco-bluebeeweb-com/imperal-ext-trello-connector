@@ -33,6 +33,7 @@ from models import (
     ListAccountsParams,
     ListBoardsParams,
     ListCardsParams,
+    ListAttachmentsParams,
     ListChecklistsParams,
     ListCommentsParams,
     ListLabelsParams,
@@ -45,6 +46,8 @@ from models import (
     TrelloBoardList,
     TrelloCard,
     TrelloCardList,
+    TrelloAttachment,
+    TrelloAttachmentList,
     TrelloChecklist,
     TrelloChecklistList,
     TokenLink,
@@ -384,8 +387,10 @@ async def list_checklists(ctx, params: ListChecklistsParams) -> ActionResult:
     if not card.get("ok"):
         return _from_envelope(card)
 
-    out = await tc.request(ctx, "GET", f"cards/{card['id']}/checklists", creds,
-                           params={"fields": "name,pos"})
+    # WITH items: `fields=name,pos` alone returns checklists as empty shells,
+    # so done_count, total_count and the item lines were all computed from
+    # nothing and came back 0/0 with no items -- on checklists that had them.
+    out = await shared.card_checklists(ctx, creds, card["id"])
     if not out.get("ok"):
         return _from_envelope(out)
 
@@ -695,3 +700,59 @@ async def check_access(ctx, params: CheckAccessParams) -> ActionResult:
             next_step=next_step,
         ),
         detail)
+
+
+@chat.function(
+    "list_attachments",
+    "List the files and links attached to a Trello card.",
+    action_type="read", chain_callable=True,
+    data_model=TrelloAttachment,
+)
+async def list_attachments(ctx, params: ListAttachmentsParams) -> ActionResult:
+    """List a card's attachments.
+
+    `isUpload` is surfaced because it decides what deleting one MEANS: an upload
+    is stored by Trello and its removal destroys the only copy, while a link is
+    a reference that can be re-added from wherever it points. Presenting both as
+    one undifferentiated list invites a deletion the user cannot undo.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await shared.resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    out = await tc.request(
+        ctx, "GET", f"cards/{card['id']}/attachments", creds,
+        params={"fields": "name,url,mimeType,bytes,isUpload,date"})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+    where = card.get("name") or params.card
+    if not rows:
+        return ActionResult.success(
+            TrelloAttachmentList(items=[], total=0),
+            f"No attachments on '{where}'.")
+
+    items = [
+        TrelloAttachment(
+            id=to.id_of(r),
+            title=to.name_of(r) or str(r.get("url") or "") or "(attachment)",
+            name=to.name_of(r),
+            url=str(r.get("url") or ""),
+            mime_type=str(r.get("mimeType") or ""),
+            bytes_size=int(r.get("bytes") or 0),
+            is_upload=bool(r.get("isUpload")),
+            created=str(r.get("date") or ""),
+        )
+        for r in rows
+    ]
+    uploads = sum(1 for i in items if i.is_upload)
+    note = f"{len(items)} attachment(s) on '{where}'"
+    if uploads:
+        note += f"; {uploads} stored by Trello, the rest are links"
+    return ActionResult.success(
+        TrelloAttachmentList(items=items, total=len(items)), note + ".")

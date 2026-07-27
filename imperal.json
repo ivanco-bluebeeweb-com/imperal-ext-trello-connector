@@ -1542,6 +1542,128 @@
       "owner_chat_tool": "trello"
     },
     {
+      "name": "list_attachments",
+      "description": "List the files and links attached to a Trello card.",
+      "action_type": "read",
+      "chain_callable": true,
+      "effects": [],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card whose attachments to read (name or id)",
+            "title": "Card",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card"
+        ],
+        "title": "ListAttachmentsParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "One attachment on a card.\n\n`is_upload` distinguishes a file Trello stores from a link that merely points\nsomewhere: deleting the first destroys the only copy, deleting the second\nonly removes a reference. That difference matters enough to be a field.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "mime_type": {
+            "default": "",
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "bytes_size": {
+            "default": 0,
+            "title": "Bytes Size",
+            "type": "integer"
+          },
+          "is_upload": {
+            "default": false,
+            "title": "Is Upload",
+            "type": "boolean"
+          },
+          "created": {
+            "default": "",
+            "title": "Created",
+            "type": "string"
+          }
+        },
+        "title": "TrelloAttachment",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
       "name": "connect_account",
       "description": "Connect a Trello account by saving its API key and token, after checking the pair actually works.",
       "action_type": "write",
@@ -3341,6 +3463,2266 @@
         "x-sdl": "entity"
       },
       "event": "trello-connector.set_check_item",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "add_attachment",
+      "description": "Attach a link to a Trello card -- a document, an image URL, anything addressable.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.attachment.created"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card to attach to (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "url": {
+            "description": "Link to attach, e.g. a Google Doc or an image URL",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "description": "Label for the link (defaults to the URL itself)",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "url"
+        ],
+        "title": "AddAttachmentParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.add_attachment",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "delete_attachment",
+      "description": "Remove an attachment from a Trello card.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.attachment.deleted"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card holding the attachment (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "attachment": {
+            "description": "Attachment to remove, by its name or id",
+            "title": "Attachment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "attachment"
+        ],
+        "title": "DeleteAttachmentParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.delete_attachment",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "edit_comment",
+      "description": "Change the text of a comment already on a Trello card.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.comment.updated"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card holding the comment (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "comment_id": {
+            "description": "Id of the comment to change -- from list_comments. A comment is an ACTION, so this is an action id.",
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "text": {
+            "description": "Replacement comment text",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "comment_id",
+          "text"
+        ],
+        "title": "EditCommentParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.edit_comment",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "delete_comment",
+      "description": "Delete a comment from a Trello card.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.comment.deleted"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card holding the comment (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "comment_id": {
+            "description": "Id of the comment to delete -- from list_comments.",
+            "title": "Comment Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "comment_id"
+        ],
+        "title": "DeleteCommentParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.delete_comment",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "add_check_item",
+      "description": "Add an item to a checklist already on a Trello card.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.checkitem.created"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card holding the checklist (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "item": {
+            "description": "Text of the item to add",
+            "title": "Item",
+            "type": "string"
+          },
+          "checklist": {
+            "default": "",
+            "description": "Which checklist to add to. Omit when the card has only one.",
+            "title": "Checklist",
+            "type": "string"
+          },
+          "position": {
+            "default": "bottom",
+            "description": "Where in the checklist: 'top' or 'bottom'",
+            "title": "Position",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "item"
+        ],
+        "title": "AddCheckItemParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.add_check_item",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "delete_check_item",
+      "description": "Remove an item from a checklist on a Trello card.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.checkitem.deleted"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card holding the checklist (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "item": {
+            "description": "Text of the item to delete",
+            "title": "Item",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "item"
+        ],
+        "title": "DeleteCheckItemParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.delete_check_item",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "update_checklist",
+      "description": "Rename a checklist on a Trello card.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.checklist.updated"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card holding the checklist (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "checklist": {
+            "description": "Checklist to rename (name or id)",
+            "title": "Checklist",
+            "type": "string"
+          },
+          "name": {
+            "description": "New checklist title",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "checklist",
+          "name"
+        ],
+        "title": "UpdateChecklistParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.update_checklist",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "delete_checklist",
+      "description": "Delete a whole checklist from a Trello card, with its items.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.checklist.deleted"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card holding the checklist (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "checklist": {
+            "description": "Checklist to delete (name or id). Its items go with it.",
+            "title": "Checklist",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "checklist"
+        ],
+        "title": "DeleteChecklistParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.delete_checklist",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "update_list",
+      "description": "Rename a Trello list (column), move it, or follow it.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.list.updated"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "list_name": {
+            "description": "List to change (name or id)",
+            "title": "List Name",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "description": "New list name",
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "default": "",
+            "description": "Move it: 'top', 'bottom' or a number",
+            "title": "Position",
+            "type": "string"
+          },
+          "subscribed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Follow (true) or unfollow (false) this list",
+            "title": "Subscribed"
+          }
+        },
+        "required": [
+          "list_name"
+        ],
+        "title": "UpdateListParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.update_list",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "archive_all_cards",
+      "description": "Archive every card in a Trello list at once.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.card.archived"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "list_name": {
+            "description": "Source list (name or id)",
+            "title": "List Name",
+            "type": "string"
+          },
+          "to_list": {
+            "default": "",
+            "description": "Destination list for a move. Omit when archiving.",
+            "title": "To List",
+            "type": "string"
+          },
+          "to_board": {
+            "default": "",
+            "description": "Destination board, when moving cards to another board",
+            "title": "To Board",
+            "type": "string"
+          }
+        },
+        "required": [
+          "list_name"
+        ],
+        "title": "ListBulkParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.archive_all_cards",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "move_all_cards",
+      "description": "Move every card from one Trello list into another.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.card.moved"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "list_name": {
+            "description": "Source list (name or id)",
+            "title": "List Name",
+            "type": "string"
+          },
+          "to_list": {
+            "default": "",
+            "description": "Destination list for a move. Omit when archiving.",
+            "title": "To List",
+            "type": "string"
+          },
+          "to_board": {
+            "default": "",
+            "description": "Destination board, when moving cards to another board",
+            "title": "To Board",
+            "type": "string"
+          }
+        },
+        "required": [
+          "list_name"
+        ],
+        "title": "ListBulkParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.move_all_cards",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "create_label",
+      "description": "Create a new label on a Trello board.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.label.created"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "name": {
+            "description": "Label text, e.g. 'Blocked'",
+            "title": "Name",
+            "type": "string"
+          },
+          "color": {
+            "default": "green",
+            "description": "Trello colour: green, yellow, orange, red, purple, blue, sky, lime, pink, black",
+            "title": "Color",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateLabelParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.create_label",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "update_label",
+      "description": "Rename a Trello label or change its colour.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.label.updated"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "label": {
+            "description": "Label to change (name, colour or id)",
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "description": "New label text",
+            "title": "Name",
+            "type": "string"
+          },
+          "color": {
+            "default": "",
+            "description": "New colour",
+            "title": "Color",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "UpdateLabelParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.update_label",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "delete_label",
+      "description": "Delete a label from a Trello board, removing it from every card.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.label.deleted"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "label": {
+            "description": "Label to delete (name, colour or id)",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "DeleteLabelParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.delete_label",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "update_board",
+      "description": "Rename a Trello board, change its description, or close and reopen it.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.board.updated"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "description": "Not BoardScoped: the board is the OBJECT here, not the context.\n\n`board` is required rather than optional, unlike BoardScoped's convenience\ndefault. Renaming or closing a board is not something to do to whichever\nboard happened to be the only one reachable.",
+        "properties": {
+          "board": {
+            "description": "Board to change (name or id)",
+            "title": "Board",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "description": "New board name",
+            "title": "Name",
+            "type": "string"
+          },
+          "desc": {
+            "default": "",
+            "description": "New board description",
+            "title": "Desc",
+            "type": "string"
+          },
+          "closed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Close/archive (true) or reopen (false) the board",
+            "title": "Closed"
+          }
+        },
+        "required": [
+          "board"
+        ],
+        "title": "UpdateBoardParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.update_board",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "delete_board",
+      "description": "Permanently delete a Trello board and everything on it. Cannot be undone.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.board.deleted"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "description": "Deleting a board is permanent -- so the name is required, never inferred.",
+        "properties": {
+          "board": {
+            "description": "Board to delete permanently (name or id)",
+            "title": "Board",
+            "type": "string"
+          },
+          "confirm": {
+            "default": false,
+            "description": "Must be true. Deleting a board destroys every list, card and comment on it, and Trello offers no undo.",
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "board"
+        ],
+        "title": "DeleteBoardParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.delete_board",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "set_board_member",
+      "description": "Add someone to a Trello board, change their role, or remove them.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.board.member_changed"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "description": "Board to change (name or id)",
+            "title": "Board",
+            "type": "string"
+          },
+          "member": {
+            "description": "Person to add or remove: email address, username, or a name already on the board",
+            "title": "Member",
+            "type": "string"
+          },
+          "role": {
+            "default": "normal",
+            "description": "'normal', 'admin' or 'observer'",
+            "title": "Role",
+            "type": "string"
+          },
+          "remove": {
+            "default": false,
+            "description": "Set true to REMOVE this person from the board",
+            "title": "Remove",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "board",
+          "member"
+        ],
+        "title": "BoardMemberParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.set_board_member",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
+      "name": "copy_card",
+      "description": "Copy a Trello card -- to the same list or another one, optionally onto a different board.",
+      "action_type": "write",
+      "chain_callable": true,
+      "effects": [
+        "trello.card.created"
+      ],
+      "id_projection": "",
+      "params_schema": {
+        "properties": {
+          "board": {
+            "default": "",
+            "description": "Board name, e.g. 'Client Work'. Omit when the credentials reach only one board.",
+            "title": "Board",
+            "type": "string"
+          },
+          "card": {
+            "description": "Card to copy (name or id)",
+            "title": "Card",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "description": "Title for the copy (defaults to the original)",
+            "title": "Name",
+            "type": "string"
+          },
+          "to_list": {
+            "default": "",
+            "description": "List to put the copy in. Omit to copy beside the original.",
+            "title": "To List",
+            "type": "string"
+          },
+          "to_board": {
+            "default": "",
+            "description": "Copy onto a different board (name or id). The destination list must be named too, since lists belong to one board.",
+            "title": "To Board",
+            "type": "string"
+          },
+          "position": {
+            "default": "bottom",
+            "description": "Where in the destination list: 'top' or 'bottom'",
+            "title": "Position",
+            "type": "string"
+          },
+          "keep": {
+            "default": "all",
+            "description": "What to carry over: 'all', 'none', or a comma-separated pick of checklists, attachments, comments, due, labels, members, stickers",
+            "title": "Keep",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card"
+        ],
+        "title": "CopyCardParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "Outcome of a write, phrased so the narrator can state what changed.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "WriteResult",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "trello-connector.copy_card",
       "background": false,
       "long_running": false,
       "scopes": [],

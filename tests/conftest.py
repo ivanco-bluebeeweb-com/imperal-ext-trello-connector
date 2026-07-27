@@ -249,6 +249,21 @@ def label_payload(label_id: str = "d2" + "a" * 22, name: str = "Urgent",
             "idBoard": "6a" + "2" * 22}
 
 
+def attachment_payload(att_id: str = "e3" + "b" * 22,
+                       name: str = "Brief.pdf",
+                       is_upload: bool = False) -> dict:
+    """An attachment. `isUpload` matters: it decides what deletion destroys."""
+    return {
+        "id": att_id,
+        "name": name,
+        "url": "https://example.dev/brief.pdf",
+        "mimeType": "application/pdf",
+        "bytes": 12345,
+        "isUpload": is_upload,
+        "date": "2026-07-20T12:00:00.000Z",
+    }
+
+
 # --- ActionResult accessors -------------------------------------------------
 # `ActionResult` carries prose on `summary` when it succeeded and on `error`
 # when it failed, and the structured code on `error_code`. Tests read through

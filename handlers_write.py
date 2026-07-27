@@ -30,21 +30,38 @@ import trello_client as tc
 import trello_objects as to
 from app import chat
 from models import (
+    AddAttachmentParams,
+    AddCheckItemParams,
     AddCommentParams,
     ArchiveCardParams,
     ArchiveListParams,
+    BoardMemberParams,
     CardLabelsParams,
     CardMembersParams,
     CheckItemParams,
     ConnectAccountParams,
     ConnectResult,
+    CopyCardParams,
     CreateBoardParams,
     CreateCardParams,
     CreateChecklistParams,
+    CreateLabelParams,
     CreateListParams,
+    DeleteAttachmentParams,
+    DeleteBoardParams,
     DeleteCardParams,
+    DeleteCheckItemParams,
+    DeleteChecklistParams,
+    DeleteCommentParams,
+    DeleteLabelParams,
+    EditCommentParams,
+    ListBulkParams,
     MoveCardParams,
+    UpdateBoardParams,
     UpdateCardParams,
+    UpdateChecklistParams,
+    UpdateLabelParams,
+    UpdateListParams,
     WriteResult,
 )
 
@@ -903,3 +920,905 @@ async def set_check_item(ctx, params: CheckItemParams) -> ActionResult:
                    f"'{card.get('name', 'card')}'",
         ),
         f"{action.capitalize()} '{item_name}' in '{checklist_name}'.")
+
+
+# --------------------------- attachments ---------------------------
+# Only LINKS are attachable here. `POST /cards/{id}/attachments` takes an
+# uploaded file as multipart/form-data, and every call in this app goes through
+# one JSON client -- so offering a `file` parameter would accept a path and then
+# have no way to deliver its bytes. A named limitation beats a broken promise.
+
+@chat.function(
+    "add_attachment",
+    "Attach a link to a Trello card -- a document, an image URL, anything "
+    "addressable.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.add_attachment",
+    effects=["trello.attachment.created"],
+)
+async def add_attachment(ctx, params: AddAttachmentParams) -> ActionResult:
+    """Attach a URL to a card."""
+    url = (params.url or "").strip()
+    if not url:
+        return _error("An attachment needs a URL. Nothing was sent to Trello.",
+                      tc.TRELLO_VALIDATION_FAILED)
+
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    body = {"url": url}
+    if (params.name or "").strip():
+        body["name"] = params.name.strip()
+
+    out = await tc.request(ctx, "POST", f"cards/{card['id']}/attachments",
+                           creds, params=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    label = to.name_of(made) or url
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=label,
+            action="attached",
+            detail=f"to '{card.get('name', 'card')}'",
+            url=str(made.get("url") or url),
+        ),
+        f"Attached '{label}' to '{card.get('name', 'card')}'.")
+
+
+@chat.function(
+    "delete_attachment",
+    "Remove an attachment from a Trello card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_attachment",
+    effects=["trello.attachment.deleted"],
+)
+async def delete_attachment(ctx, params: DeleteAttachmentParams) -> ActionResult:
+    """Delete one attachment, found by name or id.
+
+    An uploaded file is destroyed by this, not merely unlinked, so the result
+    says which kind it was: for a link the same URL can be re-attached, for an
+    upload there is nothing left to re-attach.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    found = await shared.resolve_attachment(
+        ctx, creds, card["id"], params.attachment)
+    if not found.get("ok"):
+        return _from_envelope(found)
+
+    out = await tc.request(
+        ctx, "DELETE", f"cards/{card['id']}/attachments/{found['id']}", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    kind = "uploaded file" if found.get("is_upload") else "link"
+    return ActionResult.success(
+        WriteResult(
+            id=found["id"],
+            name=found.get("name", ""),
+            action="deleted",
+            detail=f"{kind} removed from '{card.get('name', 'card')}'",
+        ),
+        f"Removed {kind} '{found.get('name', '')}' from "
+        f"'{card.get('name', 'card')}'.")
+
+
+# --------------------------- comments ---------------------------
+# A comment is an ACTION, so editing and deleting address it under the card as
+# `.../actions/{idAction}/comments`. The id comes from `list_comments`; there is
+# no way to name a comment, which is why these take an id rather than text.
+
+@chat.function(
+    "edit_comment",
+    "Change the text of a comment already on a Trello card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.edit_comment",
+    effects=["trello.comment.updated"],
+)
+async def edit_comment(ctx, params: EditCommentParams) -> ActionResult:
+    """Rewrite an existing comment."""
+    if not (params.text or "").strip():
+        return _error(
+            "A comment needs some text. To remove one, use delete_comment.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    out = await tc.request(
+        ctx, "PUT",
+        f"cards/{card['id']}/actions/{params.comment_id}/comments",
+        creds, params={"text": params.text})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=params.comment_id,
+            name=card.get("name", ""),
+            action="comment_updated",
+            detail=f"on '{card.get('name', 'card')}'",
+        ),
+        f"Comment updated on '{card.get('name', 'card')}'.")
+
+
+@chat.function(
+    "delete_comment",
+    "Delete a comment from a Trello card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_comment",
+    effects=["trello.comment.deleted"],
+)
+async def delete_comment(ctx, params: DeleteCommentParams) -> ActionResult:
+    """Remove a comment. Trello offers no undo for this."""
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    out = await tc.request(
+        ctx, "DELETE",
+        f"cards/{card['id']}/actions/{params.comment_id}/comments", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=params.comment_id,
+            name=card.get("name", ""),
+            action="comment_deleted",
+            detail=f"from '{card.get('name', 'card')}'",
+        ),
+        f"Comment deleted from '{card.get('name', 'card')}'.")
+
+
+# --------------------------- checklists ---------------------------
+
+@chat.function(
+    "add_check_item",
+    "Add an item to a checklist already on a Trello card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.add_check_item",
+    effects=["trello.checkitem.created"],
+)
+async def add_check_item(ctx, params: AddCheckItemParams) -> ActionResult:
+    """Append one item to an existing checklist.
+
+    `checklist` may be omitted when the card has exactly one -- the common case,
+    and making the user name it would be asking for information the card already
+    determines. With several, the resolver refuses rather than picking.
+    """
+    if not (params.item or "").strip():
+        return _error("An item needs some text.", tc.TRELLO_VALIDATION_FAILED)
+
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    target = await shared.resolve_checklist(
+        ctx, creds, card["id"], params.checklist)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    out = await tc.request(
+        ctx, "POST", f"checklists/{target['id']}/checkItems", creds,
+        data={"name": params.item.strip(),
+              "pos": _position_value(params.position)})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=to.name_of(made) or params.item.strip(),
+            action="created",
+            detail=f"in checklist '{target.get('name', '')}' on "
+                   f"'{card.get('name', 'card')}'",
+        ),
+        f"Added '{params.item.strip()}' to '{target.get('name', '')}'.")
+
+
+@chat.function(
+    "delete_check_item",
+    "Remove an item from a checklist on a Trello card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_check_item",
+    effects=["trello.checkitem.deleted"],
+)
+async def delete_check_item(ctx, params: DeleteCheckItemParams) -> ActionResult:
+    """Delete a checklist item, found by its text."""
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    found = await shared.resolve_check_item(ctx, creds, card["id"], params.item)
+    if not found.get("ok"):
+        return _from_envelope(found)
+
+    # Addressed under the CARD, not the checklist: that is the route Trello
+    # documents for removing an item once it exists.
+    out = await tc.request(
+        ctx, "DELETE", f"cards/{card['id']}/checkItem/{found['id']}", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=found["id"],
+            name=found.get("name", ""),
+            action="deleted",
+            detail=f"from checklist '{found.get('checklist_name', '')}' on "
+                   f"'{card.get('name', 'card')}'",
+        ),
+        f"Deleted '{found.get('name', '')}' from "
+        f"'{found.get('checklist_name', 'the checklist')}'.")
+
+
+@chat.function(
+    "update_checklist",
+    "Rename a checklist on a Trello card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.update_checklist",
+    effects=["trello.checklist.updated"],
+)
+async def update_checklist(ctx, params: UpdateChecklistParams) -> ActionResult:
+    """Rename a checklist."""
+    if not (params.name or "").strip():
+        return _error("A checklist needs a name.", tc.TRELLO_VALIDATION_FAILED)
+
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    target = await shared.resolve_checklist(
+        ctx, creds, card["id"], params.checklist)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    out = await tc.request(ctx, "PUT", f"checklists/{target['id']}", creds,
+                           data={"name": params.name.strip()})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"],
+            name=params.name.strip(),
+            action="renamed",
+            detail=f"on '{card.get('name', 'card')}'",
+        ),
+        f"Checklist renamed to '{params.name.strip()}'.")
+
+
+@chat.function(
+    "delete_checklist",
+    "Delete a whole checklist from a Trello card, with its items.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_checklist",
+    effects=["trello.checklist.deleted"],
+)
+async def delete_checklist(ctx, params: DeleteChecklistParams) -> ActionResult:
+    """Delete a checklist. Its items go with it and Trello offers no undo."""
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    target = await shared.resolve_checklist(
+        ctx, creds, card["id"], params.checklist)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    out = await tc.request(ctx, "DELETE", f"checklists/{target['id']}", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"],
+            name=target.get("name", ""),
+            action="deleted",
+            detail=f"removed from '{card.get('name', 'card')}' with its items",
+        ),
+        f"Deleted checklist '{target.get('name', '')}' and its items from "
+        f"'{card.get('name', 'card')}'.")
+
+
+# --------------------------- lists (columns) ---------------------------
+
+@chat.function(
+    "update_list",
+    "Rename a Trello list (column), move it, or follow it.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.update_list",
+    effects=["trello.list.updated"],
+)
+async def update_list(ctx, params: UpdateListParams) -> ActionResult:
+    """Change a list's name, position or subscription.
+
+    Refuses a no-op: sending an empty PUT would report success while changing
+    nothing, which reads as "renamed" to whoever asked.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    target = await _resolve_list(ctx, creds, board["id"], params.list_name)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    body: dict = {}
+    changed: list[str] = []
+    if (params.name or "").strip():
+        body["name"] = params.name.strip()
+        changed.append("name")
+    if (params.position or "").strip():
+        body["pos"] = _position_value(params.position, "top")
+        changed.append("position")
+    if params.subscribed is not None:
+        body["subscribed"] = bool(params.subscribed)
+        changed.append("subscribed")
+
+    if not body:
+        return _error(
+            "Nothing to change: name a new name, a position, or a subscription.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    out = await tc.request(ctx, "PUT", f"lists/{target['id']}", creds,
+                           data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"],
+            name=to.name_of(made) or target.get("name", ""),
+            action="updated",
+            detail=f"changed: {', '.join(changed)}",
+        ),
+        f"Updated list '{to.name_of(made) or target.get('name', '')}'.")
+
+
+@chat.function(
+    "archive_all_cards",
+    "Archive every card in a Trello list at once.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.archive_all_cards",
+    effects=["trello.card.archived"],
+)
+async def archive_all_cards(ctx, params: ListBulkParams) -> ActionResult:
+    """Archive a whole column's cards in one call.
+
+    Trello has a dedicated route for this. Archiving card by card would be N
+    requests and could fail halfway, leaving a column half-cleared with no
+    record of where it stopped.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    target = await _resolve_list(ctx, creds, board["id"], params.list_name)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    out = await tc.request(
+        ctx, "POST", f"lists/{target['id']}/archiveAllCards", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"],
+            name=target.get("name", ""),
+            action="archived",
+            detail=f"every card in '{target.get('name', 'the list')}' -- "
+                   "archived cards are recoverable from the board's archive",
+        ),
+        f"Archived every card in '{target.get('name', 'the list')}'.")
+
+
+@chat.function(
+    "move_all_cards",
+    "Move every card from one Trello list into another.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.move_all_cards",
+    effects=["trello.card.moved"],
+)
+async def move_all_cards(ctx, params: ListBulkParams) -> ActionResult:
+    """Move a column's cards into another column.
+
+    Trello needs BOTH the destination list and its board, even within one board,
+    so the destination board is resolved explicitly rather than assumed.
+    """
+    if not (params.to_list or "").strip():
+        return _error("Name the destination list.",
+                      tc.TRELLO_VALIDATION_FAILED)
+
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    source = await _resolve_list(ctx, creds, board["id"], params.list_name)
+    if not source.get("ok"):
+        return _from_envelope(source)
+
+    dest_board = board
+    if (params.to_board or "").strip():
+        # `resolve_board` takes (ctx, name) -- it loads the credentials itself --
+        # and returns the board nested under "board", the same shape move_card
+        # relies on. Passing creds and reading found["id"] would have failed on
+        # the first cross-board move.
+        found = await acct.resolve_board(ctx, params.to_board)
+        if not found.get("ok"):
+            return _from_envelope(found)
+        dest_board = found.get("board", {})
+
+    dest = await _resolve_list(ctx, creds, dest_board["id"], params.to_list)
+    if not dest.get("ok"):
+        return _from_envelope(dest)
+
+    out = await tc.request(
+        ctx, "POST", f"lists/{source['id']}/moveAllCards", creds,
+        params={"idBoard": dest_board["id"], "idList": dest["id"]})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    moved = out.get("data")
+    count = len(moved) if isinstance(moved, list) else 0
+    return ActionResult.success(
+        WriteResult(
+            id=source["id"],
+            name=source.get("name", ""),
+            action="moved",
+            detail=f"{count} card(s) to '{dest.get('name', '')}'",
+        ),
+        f"Moved {count} card(s) from '{source.get('name', '')}' to "
+        f"'{dest.get('name', '')}'.")
+
+
+# --------------------------- labels ---------------------------
+
+@chat.function(
+    "create_label",
+    "Create a new label on a Trello board.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.create_label",
+    effects=["trello.label.created"],
+)
+async def create_label(ctx, params: CreateLabelParams) -> ActionResult:
+    """Create a board label with a name and colour."""
+    if not (params.name or "").strip():
+        return _error("A label needs a name.", tc.TRELLO_VALIDATION_FAILED)
+
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    out = await tc.request(ctx, "POST", "labels", creds, data={
+        "name": params.name.strip(),
+        "color": (params.color or "green").strip().lower(),
+        "idBoard": board["id"],
+    })
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=to.name_of(made) or params.name.strip(),
+            action="created",
+            detail=f"{made.get('color', '')} label on "
+                   f"'{board.get('name', 'the board')}'",
+        ),
+        f"Created label '{params.name.strip()}'.")
+
+
+@chat.function(
+    "update_label",
+    "Rename a Trello label or change its colour.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.update_label",
+    effects=["trello.label.updated"],
+)
+async def update_label(ctx, params: UpdateLabelParams) -> ActionResult:
+    """Change a label's text or colour.
+
+    This edits the label on the BOARD, so every card carrying it changes at once
+    -- which is the point, and also why a no-op is refused rather than reported
+    as done.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    target = await _resolve_label(ctx, creds, board["id"], params.label)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    body: dict = {}
+    if (params.name or "").strip():
+        body["name"] = params.name.strip()
+    if (params.color or "").strip():
+        body["color"] = params.color.strip().lower()
+    if not body:
+        return _error("Nothing to change: give a new name or a new colour.",
+                      tc.TRELLO_VALIDATION_FAILED)
+
+    out = await tc.request(ctx, "PUT", f"labels/{target['id']}", creds,
+                           data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"],
+            name=to.name_of(made) or target.get("name", ""),
+            action="updated",
+            detail="every card carrying this label is affected",
+        ),
+        f"Updated label '{to.name_of(made) or target.get('name', '')}'.")
+
+
+@chat.function(
+    "delete_label",
+    "Delete a label from a Trello board, removing it from every card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_label",
+    effects=["trello.label.deleted"],
+)
+async def delete_label(ctx, params: DeleteLabelParams) -> ActionResult:
+    """Delete a board label.
+
+    This is board-wide: the label disappears from every card that had it. That
+    is a different act from taking a label off one card, which is what
+    `set_card_labels(remove=True)` does -- so the message says which happened.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    target = await _resolve_label(ctx, creds, board["id"], params.label)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    out = await tc.request(ctx, "DELETE", f"labels/{target['id']}", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"],
+            name=target.get("name", ""),
+            action="deleted",
+            detail="removed from the board and from every card that had it",
+        ),
+        f"Deleted label '{target.get('name', '')}' from the board -- it is gone "
+        f"from every card that had it.")
+
+
+# --------------------------- boards ---------------------------
+
+@chat.function(
+    "update_board",
+    "Rename a Trello board, change its description, or close and reopen it.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.update_board",
+    effects=["trello.board.updated"],
+)
+async def update_board(ctx, params: UpdateBoardParams) -> ActionResult:
+    """Change a board's name, description or closed state.
+
+    CLOSING is reversible -- Trello keeps the board and everything on it, and
+    `closed=false` brings it back. That is why this lives beside a rename rather
+    than behind the confirmation gate that `delete_board` carries: the two look
+    similar in a menu and could not be more different in consequence.
+    """
+    picked = await acct.resolve_board(ctx, params.board)
+    if not picked.get("ok"):
+        return _from_envelope(picked)
+    board = picked.get("board", {})
+    creds = (picked.get("key", ""), picked.get("token", ""))
+
+    body: dict = {}
+    changed: list[str] = []
+    if (params.name or "").strip():
+        body["name"] = params.name.strip()
+        changed.append("name")
+    if (params.desc or "").strip():
+        body["desc"] = params.desc.strip()
+        changed.append("description")
+    if params.closed is not None:
+        body["closed"] = bool(params.closed)
+        changed.append("closed" if params.closed else "reopened")
+
+    if not body:
+        return _error(
+            "Nothing to change: give a new name, a description, or closed "
+            "true/false.", tc.TRELLO_VALIDATION_FAILED)
+
+    out = await tc.request(ctx, "PUT", f"boards/{board['id']}", creds,
+                           data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made) or board.get("id", ""),
+            name=to.name_of(made) or board.get("name", ""),
+            action="updated",
+            detail=f"changed: {', '.join(changed)}",
+            url=str(made.get("shortUrl") or made.get("url") or ""),
+        ),
+        f"Updated board '{to.name_of(made) or board.get('name', '')}' "
+        f"({', '.join(changed)}).")
+
+
+@chat.function(
+    "delete_board",
+    "Permanently delete a Trello board and everything on it. Cannot be undone.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_board",
+    effects=["trello.board.deleted"],
+)
+async def delete_board(ctx, params: DeleteBoardParams) -> ActionResult:
+    """Delete a board permanently.
+
+    Gated on an explicit `confirm`, unlike `delete_card`: a card is one item,
+    while a board takes every list, card, comment and attachment on it, and
+    Trello has no undo and no trash for boards. Closing (`update_board` with
+    closed=true) does what most people mean and is reversible, so the refusal
+    below names it.
+    """
+    if not params.confirm:
+        return _error(
+            "Deleting a board is permanent -- every list, card, comment and "
+            "attachment on it goes too, and Trello offers no undo. Pass "
+            "confirm=true if that is really the intent. To hide a board "
+            "reversibly instead, close it: update_board with closed=true.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    picked = await acct.resolve_board(ctx, params.board)
+    if not picked.get("ok"):
+        return _from_envelope(picked)
+    board = picked.get("board", {})
+    creds = (picked.get("key", ""), picked.get("token", ""))
+
+    out = await tc.request(ctx, "DELETE", f"boards/{board['id']}", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=board.get("id", ""),
+            name=board.get("name", ""),
+            action="deleted",
+            detail="permanently -- the board and all its contents are gone",
+        ),
+        f"Deleted board '{board.get('name', '')}' permanently.")
+
+
+@chat.function(
+    "set_board_member",
+    "Add someone to a Trello board, change their role, or remove them.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.set_board_member",
+    effects=["trello.board.member_changed"],
+)
+async def set_board_member(ctx, params: BoardMemberParams) -> ActionResult:
+    """Invite, re-role or remove a board member.
+
+    Adding is by EMAIL through `PUT /boards/{id}/members`, which invites someone
+    who has no Trello account yet. Removing needs a member ID, so a name is
+    resolved against the board's current members first -- an email cannot be
+    used to remove, because Trello matches removals by id only.
+    """
+    picked = await acct.resolve_board(ctx, params.board)
+    if not picked.get("ok"):
+        return _from_envelope(picked)
+    board = picked.get("board", {})
+    creds = (picked.get("key", ""), picked.get("token", ""))
+
+    reference = (params.member or "").strip()
+    if not reference:
+        return _error("Name the person to add or remove.",
+                      tc.TRELLO_VALIDATION_FAILED)
+
+    role = (params.role or "normal").strip().lower()
+    if role not in ("normal", "admin", "observer"):
+        return _error(
+            f"'{params.role}' is not a Trello board role. Use 'normal', "
+            "'admin' or 'observer'.", tc.TRELLO_VALIDATION_FAILED)
+
+    if params.remove:
+        found = await shared.resolve_member(ctx, creds, board["id"], reference)
+        if not found.get("ok"):
+            return _from_envelope(found)
+        out = await tc.request(
+            ctx, "DELETE", f"boards/{board['id']}/members/{found['id']}", creds)
+        if not out.get("ok"):
+            return _from_envelope(out)
+        return ActionResult.success(
+            WriteResult(
+                id=found["id"],
+                name=found.get("name", reference),
+                action="removed",
+                detail=f"from board '{board.get('name', '')}'",
+            ),
+            f"Removed {found.get('name', reference)} from "
+            f"'{board.get('name', '')}'.")
+
+    if "@" in reference:
+        out = await tc.request(
+            ctx, "PUT", f"boards/{board['id']}/members", creds,
+            params={"email": reference, "type": role})
+    else:
+        # No email: this must be someone already reachable, so resolve to an id
+        # and set the role directly. Trello's add-by-email route needs an email.
+        found = await shared.resolve_member(ctx, creds, board["id"], reference)
+        if not found.get("ok"):
+            return _from_envelope(found)
+        out = await tc.request(
+            ctx, "PUT", f"boards/{board['id']}/members/{found['id']}", creds,
+            params={"type": role})
+
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=board.get("id", ""),
+            name=reference,
+            action="invited" if "@" in reference else "role_changed",
+            detail=f"as {role} on board '{board.get('name', '')}'",
+        ),
+        f"{reference} is now {role} on '{board.get('name', '')}'.")
+
+
+# --------------------------- copy a card ---------------------------
+
+@chat.function(
+    "copy_card",
+    "Copy a Trello card -- to the same list or another one, optionally onto a "
+    "different board.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.copy_card",
+    effects=["trello.card.created"],
+)
+async def copy_card(ctx, params: CopyCardParams) -> ActionResult:
+    """Duplicate a card via `POST /cards` with `idCardSource`.
+
+    Trello has no /copy route: a copy is a CREATE that names a source. What
+    comes along is controlled by `keepFromSource`, which defaults to `all` here
+    because a "copy" that silently dropped the checklists and attachments would
+    not be one.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    dest_board = board
+    if (params.to_board or "").strip():
+        found = await acct.resolve_board(ctx, params.to_board)
+        if not found.get("ok"):
+            return _from_envelope(found)
+        dest_board = found.get("board", {})
+
+    destination = (params.to_list or "").strip()
+    if not destination and dest_board.get("id") != board.get("id"):
+        return _error(
+            f"Copying onto board '{dest_board.get('name', '')}' also needs the "
+            "destination list -- lists belong to one board, so the card's "
+            "current list does not exist over there.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    if destination:
+        target = await _resolve_list(ctx, creds, dest_board["id"], destination)
+        if not target.get("ok"):
+            return _from_envelope(target)
+        list_id = target["id"]
+        list_name = target.get("name", destination)
+    else:
+        # Same list as the source: read it off the card rather than making the
+        # user name where the card already is.
+        list_id = str(card.get("idList") or "")
+        list_name = ""
+        if not list_id:
+            detail = await tc.request(ctx, "GET", f"cards/{card['id']}", creds,
+                                      params={"fields": "idList"})
+            if not detail.get("ok"):
+                return _from_envelope(detail)
+            list_id = str((detail.get("data") or {}).get("idList") or "")
+        if not list_id:
+            return _error(
+                "Could not tell which list the source card is in, so there is "
+                "nowhere to put the copy. Name a destination list.",
+                tc.TRELLO_RESPONSE_UNEXPECTED)
+
+    body = {
+        "idList": list_id,
+        "idCardSource": card["id"],
+        "keepFromSource": (params.keep or "all").strip() or "all",
+        "pos": _position_value(params.position),
+    }
+    if (params.name or "").strip():
+        body["name"] = params.name.strip()
+
+    out = await tc.request(ctx, "POST", "cards", creds, data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    where = f" in '{list_name}'" if list_name else ""
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=to.name_of(made),
+            action="copied",
+            detail=f"from '{card.get('name', 'card')}'{where}",
+            url=str(made.get("shortUrl") or made.get("url") or ""),
+        ),
+        f"Copied '{card.get('name', 'card')}' to '{to.name_of(made)}'{where}.")
