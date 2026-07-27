@@ -572,14 +572,28 @@ def custom_field_clear_body(field_type: str) -> dict:
     proved clearing was type-dependent and then assumed one shape covered every
     scalar.
 
-    Trello has no "empty" body. Clearing is setting the field's OWN key to an
-    empty string, so it uses the same key as writing a value does -- the shared
-    map above is what keeps those two from drifting apart. A dropdown has no
-    `value` at all: it carries an option id, so it is emptied by unsetting that.
+    Clearing is setting the field's OWN key to an empty string, so it uses the
+    same key as writing a value does -- the shared map above is what keeps those
+    two from drifting apart. Two types are exceptions: a dropdown has no `value`
+    at all (it carries an option id, so it is emptied by unsetting that), and a
+    date cannot hold an empty string (see below).
     """
     kind = (field_type or "").strip().lower()
     if kind == "list":
         return {"idValue": ""}
+    if kind == "date":
+        # DATE IS THE EXCEPTION, and it took a second live rejection to find.
+        # {"value": {"date": ""}} is refused the same way {"value": {}} was,
+        # because "" is not a date-time and the typed key can only carry a
+        # valid one -- there is no empty date to write. Trello's own way out is
+        # a bare empty `value`, which says "no value at all" without having to
+        # be a value of the field's type.
+        #
+        # Deliberately NOT applied to the other scalars: an empty string IS a
+        # legal text and a legal number, their typed clears are verified live,
+        # and widening an exception past the case that needs it is how the
+        # dropdown assumption spread to every scalar in the first place.
+        return {"value": ""}
     # Unknown types fall back to `text`, matching how custom_field_body treats
     # anything Trello adds later that behaves like text.
     return {"value": {_CUSTOM_FIELD_VALUE_KEYS.get(kind, "text"): ""}}

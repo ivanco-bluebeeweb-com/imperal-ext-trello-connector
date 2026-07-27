@@ -800,7 +800,9 @@ async def test_every_scalar_type_clears_through_its_own_key(
     # date was wrong. The mapping is the thing under test here; the handler's use
     # of it is covered by the tests either side of this one.
     assert shared.custom_field_clear_body("text") == {"value": {"text": ""}}
-    assert shared.custom_field_clear_body("date") == {"value": {"date": ""}}
+    # DATE is the exception: "" is not a date-time, so the typed key cannot
+    # carry it and Trello refuses. Verified live, both ways round.
+    assert shared.custom_field_clear_body("date") == {"value": ""}
     assert shared.custom_field_clear_body("number") == {"value": {"number": ""}}
     assert shared.custom_field_clear_body("checkbox") == {
         "value": {"checked": ""}}
