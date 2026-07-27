@@ -241,8 +241,8 @@ async def test_a_wrong_length_key_is_named_as_impossible(ctx, http):
     assert "not one" in out["error"]
 
 
-async def test_a_correctly_shaped_key_points_at_the_credential(ctx, http):
-    """A right-shaped key that Trello still rejects is NOT a paste mistake."""
+async def test_a_rejected_token_points_at_the_token(ctx, http):
+    """Trello says `invalid token` -> the TOKEN is the thing to regenerate."""
     http.push("invalid token", status=401)
     out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
     assert out["ok"] is False
@@ -250,6 +250,23 @@ async def test_a_correctly_shaped_key_points_at_the_credential(ctx, http):
     assert "revoked" in low or "expired" in low
     # It must NOT tell the user to re-copy a key that is already correct.
     assert "different key" in low or "fresh token" in low
+
+
+async def test_a_rejected_key_does_not_blame_the_token(ctx, http):
+    """The misdiagnosis this replaced.
+
+    Trello validates the KEY FIRST and answers `invalid key` for every bad
+    combination; a revoked token reports `invalid token` separately. So on
+    `invalid key` with a correctly-shaped key, telling the user to generate a
+    fresh token sends them to fix the half that still works -- and the retired
+    app-key page is the usual reason a well-formed key is refused.
+    """
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    low = out["error"].lower()
+    assert "rejecting the key" in low
+    assert "app-key" in low
+    assert "generate a new api key" in low or "new key" in low
 
 
 async def test_non_hex_characters_are_flagged(ctx, http):
@@ -281,8 +298,12 @@ async def test_a_correct_shape_does_not_also_say_recopy_the_key(ctx, http):
     http.push("invalid key", status=401)
     out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
     assert out["ok"] is False
-    assert "API Key tab" not in out["error"]
     assert "the paste is fine" in out["error"]
+    # The contradiction was the stock line telling the user to COPY the key
+    # again. Pointing at the API Key tab to GENERATE A NEW one is the opposite
+    # instruction and is correct here, so the assertion pins the stock
+    # sentence itself rather than a substring both messages share.
+    assert "Copy it from the API Key tab" not in out["error"]
 
 
 async def test_a_wrong_shape_still_keeps_the_stock_advice(ctx, http):

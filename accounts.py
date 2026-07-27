@@ -203,15 +203,20 @@ def _shape_complaint(key: str, token: str):
     return None
 
 
-def _shape_note(key: str, token: str) -> str:
+def _shape_note(key: str, token: str, code: str = "") -> tuple[str, bool]:
     """Describe what ARRIVED, so a rejection is diagnosable without a guess.
 
-    Trello's rejection is a bare "invalid key" -- true, but it does not say
-    whether the key was 8 characters, 40, or a correct 32 that has been revoked.
-    Those need opposite actions (fix the paste vs generate a new token), and
-    without knowing which, the user re-copies a correct value and gets the same
-    sentence back. This states the observed lengths and flags one that cannot be
-    right, so the NEXT attempt is informed rather than another shot in the dark.
+    Returns (note, supersedes). `supersedes` is True when the note has
+    established the PASTE is fine -- there the stock advice ("copy the key from
+    the API Key tab") contradicts the conclusion, so the caller drops it.
+
+    WHICH HALF Trello refused decides the advice, and `code` carries that.
+    Verified against the live API: Trello validates the KEY FIRST and answers
+    `invalid key` for every bad combination -- including a request with no key
+    at all but a bad token. Atlassian documents the other side: a revoked TOKEN
+    answers `invalid token`. So `invalid key` on a correctly-shaped key means
+    the KEY itself is not accepted, and advising the user to regenerate their
+    token sends them to fix the half that still works.
 
     Only LENGTH and CHARACTER CLASS are reported -- never the values, not even a
     prefix. A credential must not become readable through an error message, and
@@ -241,16 +246,32 @@ def _shape_note(key: str, token: str) -> str:
             "picked up in the copy.")
         return " ".join(parts), False
 
-    # The key is exactly the right shape, so the paste is not the problem: this
-    # is a revoked/expired credential or a key-token mismatch. The stock advice
-    # would tell the user to re-copy a key that is already correct, so this
-    # note supersedes it.
+    # The key is exactly the right shape, so the paste is not the problem. What
+    # to do next depends on which half Trello refused -- and it says so.
     parts.append(
         "The key is exactly the right shape, so the paste is fine -- this "
-        "is a credential problem, not a typing one. Either the token was "
-        "revoked or expired, or the token was generated with a DIFFERENT "
-        "key (a token only works with the key that created it). Generate a "
-        "fresh token from the Token link beside THIS key and reconnect.")
+        "is a credential problem, not a typing one.")
+
+    if code == tc.TRELLO_KEY_REJECTED:
+        # Trello refused the KEY, not the token. The commonest cause is a key
+        # from the retired trello.com/app-key page: those keys are not tied to
+        # a Power-Up, cannot be migrated, and stop being accepted -- so no new
+        # token will ever rescue one. A fresh key must be generated instead.
+        parts.append(
+            "Trello is rejecting the KEY itself, not the token -- a revoked "
+            "token reports itself separately. A well-formed key gets refused "
+            "when it came from the retired trello.com/app-key page: those keys "
+            "are not tied to a Power-Up and cannot be migrated, so a new token "
+            "will not help. Generate a NEW key at trello.com/apps/admin -- open "
+            "(or create) a Power-Up, API Key tab, 'Generate a new API Key' -- "
+            "then create a token from the link beside that new key and paste "
+            "both.")
+    else:
+        parts.append(
+            "Either the token was revoked or expired, or it was generated with "
+            "a DIFFERENT key (a token only works with the key that created "
+            "it). Generate a fresh token from the Token link beside THIS key "
+            "and reconnect.")
     return " ".join(parts), True
 
 
@@ -292,7 +313,7 @@ async def add_pair(ctx, key: str, token: str) -> dict:
         # That is a dead end: re-copying a correct key changes nothing and the
         # user has no way to tell which case they are in. Describing the
         # OBSERVED SHAPE turns the second attempt into a diagnosis.
-        note, supersedes = _shape_note(key, token)
+        note, supersedes = _shape_note(key, token, info.get("code", ""))
         stock = info.get("error") or tc.message_for(tc.TRELLO_TOKEN_REJECTED)
         # When the note has established the paste is fine, the stock line
         # ("copy the key from the API Key tab") contradicts it -- so it goes.
