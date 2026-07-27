@@ -280,10 +280,19 @@ async def test_an_unavailable_check_still_returns_the_link(ctx, http):
     assert f"key={TEST_KEY}" in result.data.authorize_url
 
 
+# A 64-character stand-in for Trello's API *Secret*, built by repeating one
+# character so it is unmistakably fabricated -- no real credential has ever been
+# in this repo, and a secret scanner reading `key="..."` should not have to guess
+# that. The LENGTH is the whole point of the test: 64 is the Secret's shape, and
+# the Secret is what sits directly under the key on Trello's page.
+FAKE_SECRET_SHAPED_VALUE = "e" * 64
+
+
 async def test_the_secret_pasted_as_a_key_is_caught(ctx, http):
     """The Secret is 64 hex and sits under the key, so it gets pasted here.
     Verified against the live API: it cannot authorise any call."""
-    result = await hr.get_token_link(ctx, GetTokenLinkParams(key="e" * 64))
+    result = await hr.get_token_link(
+        ctx, GetTokenLinkParams(key=FAKE_SECRET_SHAPED_VALUE))
     assert succeeded(result) is False
     # No pointless authorize round trip for a value that cannot be a key.
     assert http.calls == []
