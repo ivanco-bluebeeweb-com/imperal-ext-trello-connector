@@ -203,7 +203,43 @@ def _shape_complaint(key: str, token: str):
     return None
 
 
-def _shape_note(key: str, token: str, code: str = "") -> tuple[str, bool]:
+async def key_is_live(ctx, key: str) -> bool | None:
+    """Ask Trello whether the KEY ALONE is real, independent of any token.
+
+    Why this exists. `api.trello.com` answers a bare `invalid key` for every
+    failing combination -- verified against the live API, including a request
+    with a GOOD key and a bad token. So the REST error cannot tell "your key is
+    dead" from "your key is fine, the token is wrong", and advice based on it
+    talks people into throwing away a working key.
+
+    The authorize PAGE takes the key on its own -- there is no token in the
+    request -- so its verdict is about the key and nothing else:
+      * HTTP 200 -> Trello renders the Allow prompt, so the key is LIVE
+      * HTTP 404 -> Trello does not know this key, so it is DEAD
+
+    Returns True/False, or None when the check itself could not be made. None
+    is deliberately NOT False: an unreachable page or an unexpected status is
+    ignorance, not evidence, and must never be reported as a dead key.
+    """
+    url = ("https://trello.com/1/authorize?expiration=1day&scope=read"
+           f"&response_type=token&key={key}")
+    try:
+        resp = await ctx.http.get(url, timeout=15,
+                                  headers={"Accept": "text/html"})
+    except Exception:
+        # The pair verdict still stands on its own; this is only enrichment.
+        return None
+
+    status = getattr(resp, "status_code", 0)
+    if status == 200:
+        return True
+    if status == 404:
+        return False
+    return None
+
+
+def _shape_note(key: str, token: str, code: str = "",
+                key_live: bool | None = None) -> tuple[str, bool]:
     """Describe what ARRIVED, so a rejection is diagnosable without a guess.
 
     Returns (note, supersedes). `supersedes` is True when the note has
@@ -252,20 +288,44 @@ def _shape_note(key: str, token: str, code: str = "") -> tuple[str, bool]:
         "The key is exactly the right shape, so the paste is fine -- this "
         "is a credential problem, not a typing one.")
 
-    if code == tc.TRELLO_KEY_REJECTED:
-        # Trello refused the KEY, not the token. The commonest cause is a key
-        # from the retired trello.com/app-key page: those keys are not tied to
-        # a Power-Up, cannot be migrated, and stop being accepted -- so no new
-        # token will ever rescue one. A fresh key must be generated instead.
+    if code == tc.TRELLO_KEY_REJECTED and key_live is False:
+        # The authorize page does not know this key, so it really is dead. The
+        # commonest cause is a key from the retired trello.com/app-key page:
+        # not tied to a Power-Up, cannot be migrated, and no token rescues one.
         parts.append(
-            "Trello is rejecting the KEY itself, not the token -- a revoked "
-            "token reports itself separately. A well-formed key gets refused "
-            "when it came from the retired trello.com/app-key page: those keys "
-            "are not tied to a Power-Up and cannot be migrated, so a new token "
-            "will not help. Generate a NEW key at trello.com/apps/admin -- open "
-            "(or create) a Power-Up, API Key tab, 'Generate a new API Key' -- "
-            "then create a token from the link beside that new key and paste "
-            "both.")
+            "Trello does not recognise this KEY at all -- checked against the "
+            "authorize page, which validates the key on its own. A well-formed "
+            "key gets refused when it came from the retired "
+            "trello.com/app-key page: those keys are not tied to a Power-Up and "
+            "cannot be migrated, so a new token will not help. Generate a NEW "
+            "key at trello.com/apps/admin -- open (or create) a Power-Up, API "
+            "Key tab, 'Generate a new API Key' -- then create a token from the "
+            "link beside that new key and paste both.")
+    elif code == tc.TRELLO_KEY_REJECTED and key_live is True:
+        # The decisive case. Trello's REST error says "invalid key" even when
+        # the key is perfectly good and only the TOKEN is bad -- verified
+        # against the live API. Taking that wording at face value tells people
+        # to throw away a working key, so the authorize page is asked directly
+        # and its answer overrides the misleading REST text.
+        parts.append(
+            "Your KEY IS VALID -- Trello's authorize page accepts it, even "
+            "though the REST error says 'invalid key'. That wording is what "
+            "Trello returns for the whole pair, so the TOKEN is the half at "
+            "fault: it was never created, was revoked, has expired, or belongs "
+            "to a different key. Keep this key. Create a token for it at "
+            "trello.com/apps/admin -- your Power-Up, API Key tab, the 'Token' "
+            "link beside the key -- click Allow, and paste what Trello then "
+            "shows. Note the SECRET on that page is not the token: it is for "
+            "OAuth signing and can never authorise a REST call.")
+    elif code == tc.TRELLO_KEY_REJECTED:
+        # key_live is None: the check could not be made. Ignorance is not
+        # evidence, so neither half is blamed -- both possibilities are named.
+        parts.append(
+            "Trello returns 'invalid key' for the pair as a whole, so either "
+            "half could be at fault. Check the token first -- it expires and is "
+            "revocable, and it only works with the key that created it. "
+            "Generate a fresh token from the Token link beside THIS key at "
+            "trello.com/apps/admin before replacing the key itself.")
     else:
         parts.append(
             "Either the token was revoked or expired, or it was generated with "
@@ -313,7 +373,15 @@ async def add_pair(ctx, key: str, token: str) -> dict:
         # That is a dead end: re-copying a correct key changes nothing and the
         # user has no way to tell which case they are in. Describing the
         # OBSERVED SHAPE turns the second attempt into a diagnosis.
-        note, supersedes = _shape_note(key, token, info.get("code", ""))
+        # `invalid key` is Trello's answer for a bad PAIR -- a good key with a
+        # bad token gets it too. So when the key is well formed, ask the
+        # authorize page (which takes the key alone) which half is really
+        # wrong, rather than repeating wording that blames the key.
+        code = info.get("code", "")
+        key_live = None
+        if code == tc.TRELLO_KEY_REJECTED and len(key) == 32:
+            key_live = await key_is_live(ctx, key)
+        note, supersedes = _shape_note(key, token, code, key_live)
         stock = info.get("error") or tc.message_for(tc.TRELLO_TOKEN_REJECTED)
         # When the note has established the paste is fine, the stock line
         # ("copy the key from the API Key tab") contradicts it -- so it goes.

@@ -262,9 +262,10 @@ async def test_a_rejected_key_does_not_blame_the_token(ctx, http):
     app-key page is the usual reason a well-formed key is refused.
     """
     http.push("invalid key", status=401)
+    http.push("", status=404)          # authorize page: key unknown -> dead
     out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
     low = out["error"].lower()
-    assert "rejecting the key" in low
+    assert "does not recognise this key" in low
     assert "app-key" in low
     assert "generate a new api key" in low or "new key" in low
 
@@ -311,3 +312,57 @@ async def test_a_wrong_shape_still_keeps_the_stock_advice(ctx, http):
     http.push("invalid key", status=401)
     out = await acct.add_pair(ctx, "abcd1234", TEST_TOKEN)
     assert "API Key tab" in out["error"]
+
+
+
+# --- which half is really wrong --------------------------------------------
+# Verified against the live API: `invalid key` is what Trello returns for a bad
+# PAIR -- a GOOD key with a bad token gets exactly the same wording. Believing
+# it talks users into discarding a working key, so the authorize page (which
+# takes the key alone) is consulted and its verdict wins.
+
+async def test_a_live_key_is_never_called_dead(ctx, http):
+    """The regression that caused a real support loop."""
+    http.push("invalid key", status=401)
+    http.push("<html>Allow</html>", status=200)   # authorize page: key is live
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    low = out["error"].lower()
+    assert "your key is valid" in low
+    assert "token is the half at fault" in low
+    # It must NOT send the user off to generate a new key.
+    assert "generate a new key" not in low
+
+
+async def test_a_live_key_warns_the_secret_is_not_the_token(ctx, http):
+    """The key/secret pair sit side by side; the secret cannot authorise."""
+    http.push("invalid key", status=401)
+    http.push("<html>Allow</html>", status=200)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert "secret" in out["error"].lower()
+
+
+async def test_an_unknown_key_verdict_blames_neither_half(ctx, http):
+    """If the check cannot be made, ignorance must not become evidence."""
+    http.push("invalid key", status=401)
+    http.push("", status=500)          # authorize page: no usable verdict
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    low = out["error"].lower()
+    assert "either half could be at fault" in low
+    assert "does not recognise this key" not in low
+
+
+async def test_the_key_check_failing_does_not_break_the_error(ctx, http):
+    """A transport failure on the enrichment must not swallow the real reason."""
+    http.push("invalid key", status=401)
+    http.push(RuntimeError("authorize page unreachable"))
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is False
+    assert "what arrived" in out["error"].lower()
+
+
+async def test_a_wrong_shaped_key_skips_the_extra_call(ctx, http):
+    """No point asking about a value that cannot be a key at all."""
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, "abcd1234", TEST_TOKEN)
+    assert out["ok"] is False
+    assert len(http.calls) == 1
