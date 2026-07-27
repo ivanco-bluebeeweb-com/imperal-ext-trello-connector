@@ -21,10 +21,16 @@ from imperal_sdk import ActionResult
 from app import chat, ext
 
 
-@ext.webhook("head_probe", method="HEAD")
+@ext.webhook("head_probe", method="GET")
 async def trello_head_probe(ctx, headers: dict | None = None, body: str = "",
                             query_params: dict | None = None):
-    """Answer 200 to Trello's callbackURL validation probe."""
+    """Answer 200 to Trello's callbackURL validation probe.
+
+    Declared GET, not HEAD: the manifest schema permits only POST/GET/PUT/
+    DELETE. Most HTTP stacks answer a HEAD by running the GET route and
+    dropping the body, so a GET route may satisfy Trello's probe -- that is
+    what this deploy tests.
+    """
     return {"status_code": 200, "body": ""}
 
 

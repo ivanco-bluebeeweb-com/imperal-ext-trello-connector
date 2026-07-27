@@ -5736,7 +5736,7 @@
   "webhooks": [
     {
       "path": "/head_probe",
-      "method": "HEAD",
+      "method": "GET",
       "secret_header": ""
     },
     {
