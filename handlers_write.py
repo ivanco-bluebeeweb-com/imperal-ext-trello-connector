@@ -1609,6 +1609,11 @@ async def update_board(ctx, params: UpdateBoardParams) -> ActionResult:
     if not out.get("ok"):
         return _from_envelope(out)
 
+    # A RENAME changes the very thing names are resolved against, so the cache
+    # has to go: otherwise the new name is unknown while the old one still
+    # resolves -- the confusing half-state where both answers are wrong.
+    await acct.forget_cache(ctx)
+
     made = out.get("data") or {}
     return ActionResult.success(
         WriteResult(
@@ -1656,6 +1661,11 @@ async def delete_board(ctx, params: DeleteBoardParams) -> ActionResult:
     out = await tc.request(ctx, "DELETE", f"boards/{board['id']}", creds)
     if not out.get("ok"):
         return _from_envelope(out)
+
+    # A deleted board must stop being offered. Leaving it cached is worse than
+    # the missing-new-board case: the next call resolves a name to a board that
+    # no longer exists, and the resulting 404 reads like a Trello fault.
+    await acct.forget_cache(ctx)
 
     return ActionResult.success(
         WriteResult(
@@ -2540,6 +2550,12 @@ async def copy_board(ctx, params: CopyBoardParams) -> ActionResult:
         return _from_envelope(out)
 
     made = out.get("data") or {}
+    # The copy is a NEW board, so the cached board list is now wrong. Proven
+    # live: right after a successful copy, looking the new board up by name
+    # answered "no reachable board matches" and listed only the original --
+    # a correct write that looked like a failed one.
+    await acct.forget_cache(ctx)
+
     what = "with its cards" if params.keep_cards else "structure only, no cards"
     return ActionResult.success(
         WriteResult(

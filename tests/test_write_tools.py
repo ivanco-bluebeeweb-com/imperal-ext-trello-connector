@@ -1075,3 +1075,76 @@ async def test_dropdown_result_shows_the_option_text_not_its_id(
     assert "High" in text
     # The raw option id must not leak into the summary.
     assert "bb" + "2" * 22 not in text
+
+
+# --- board cache invalidation ------------------------------------------------
+# The account store caches the board list so panels stay fast. Every write that
+# changes WHICH BOARDS EXIST, or what they are called, has to drop that cache --
+# otherwise the connector answers questions from a stale list.
+#
+# This whole group exists because of a live failure the suite could not see:
+# copy_board succeeded, and looking the new board up by name immediately after
+# answered "No reachable Trello board matches 'Webbee copy probe'" while listing
+# only the original. A correct write that looks like a failed one.
+
+async def test_copy_board_drops_the_stale_board_cache(
+        connected_ctx, http, monkeypatch):
+    """A copied board must be findable straight away."""
+    import accounts as acct
+    dropped = []
+
+    async def spy(ctx):
+        dropped.append(True)
+
+    monkeypatch.setattr(acct, "forget_cache", spy)
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push({"id": "nb" + "8" * 22, "name": "Copy",
+               "url": "https://trello.com/b/xyz"})
+    result = await hw.copy_board(connected_ctx, CopyBoardParams(
+        board="Client Work", name="Copy"))
+    assert succeeded(result) is True
+    assert dropped, "the new board would stay invisible until the cache expired"
+
+
+async def test_deleting_a_board_drops_the_cache(
+        connected_ctx, http, monkeypatch):
+    """A deleted board must stop resolving.
+
+    Worse than the missing-new-board case: a stale entry resolves a name to a
+    board that no longer exists, and the 404 that follows reads like a Trello
+    fault rather than a cache that was never cleared.
+    """
+    import accounts as acct
+    dropped = []
+
+    async def spy(ctx):
+        dropped.append(True)
+
+    monkeypatch.setattr(acct, "forget_cache", spy)
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push({})
+    result = await hw.delete_board(connected_ctx, DeleteBoardParams(
+        board="Client Work", confirm=True))
+    assert succeeded(result) is True
+    assert dropped
+
+
+async def test_renaming_a_board_drops_the_cache(
+        connected_ctx, http, monkeypatch):
+    """A rename changes the thing names are resolved against."""
+    import accounts as acct
+    dropped = []
+
+    async def spy(ctx):
+        dropped.append(True)
+
+    monkeypatch.setattr(acct, "forget_cache", spy)
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push(board_payload(name="Renamed"))
+    result = await hw.update_board(connected_ctx, UpdateBoardParams(
+        board="Client Work", name="Renamed"))
+    assert succeeded(result) is True
+    assert dropped
