@@ -112,9 +112,38 @@ lacks scope" — two problems with opposite fixes.
 * **Trello** (left) — connection state at a glance.
 * **Secrets** (right) — the platform's own credential editor.
 
+## Function prices
+
+Per-action, in tokens, and the rule is **price = cost of work, not importance of
+the function** — the same scheme as the Slack and Notion connectors, so a user
+moving between them is not surprised.
+
+| Price | What it buys | Count |
+|---|---|---|
+| **0** | No Trello call at all | 4 |
+| **1** | One Trello call | 40 |
+| **2** | Several calls, cross-object name resolution, bulk, or a write other people see | 16 |
+| **3** | Copying or destroying a whole board | 2 |
+
+The four free ones — `check_access`, `list_accounts`, `get_token_link`,
+`connect_account` — never reach Trello. They read credentials the app already
+holds or build a URL by concatenation. Charging for them would be charging for
+the interface, and `connect_account` is the front door: a connector that bills
+you for connecting is a connector you do not connect.
+
+`delete_card` costs **1**, not more, although it cannot be undone. Price measures
+work; the `confirm=true` gate handles risk. Charging extra for destruction makes
+the tariff *pretend* to be a safety feature, and the one thing worse than no
+protection is protection that only looks like it.
+
+Four tests read the shipped manifest and fail if a tool ships unpriced (a silent
+zero), if a price outlives a renamed tool (charging for a ghost), if `free_tools`
+drifts from the zero-priced set, or if the free four ever change without someone
+justifying it.
+
 ## Tests
 
-202 tests, no network:
+211 tests, no network:
 
 ```
 python -m pytest tests/ -q

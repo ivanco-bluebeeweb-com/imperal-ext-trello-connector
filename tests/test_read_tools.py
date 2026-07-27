@@ -332,3 +332,52 @@ def test_the_full_name_wins_when_both_are_known():
 def test_unnamed_only_when_the_account_has_neither():
     """Still honest in the one case where nothing is actually known."""
     assert hr._describe_account({"account_name": "", "username": ""}) == "unnamed"
+
+
+# --- function prices ---------------------------------------------------------
+# A tool added later with no price silently bills NOTHING, and nobody notices
+# until the earnings report is wrong. The manifest is the shipped artefact, so
+# the check reads the manifest rather than a copy of the list kept in a test.
+
+def _manifest() -> dict:
+    import json
+    import pathlib
+    path = pathlib.Path(__file__).resolve().parent.parent / "imperal.json"
+    return json.loads(path.read_text())
+
+
+def test_every_function_has_a_price():
+    """No tool may ship unpriced -- that is a silent zero, not a free tool."""
+    man = _manifest()
+    names = {t["name"] for t in man["tools"]}
+    priced = set(man["pricing"]["tool_prices"])
+    assert names - priced == set(), f"unpriced: {sorted(names - priced)}"
+
+
+def test_no_price_for_a_function_that_does_not_exist():
+    """A renamed tool leaves its old price behind, charging for a ghost."""
+    man = _manifest()
+    names = {t["name"] for t in man["tools"]}
+    priced = set(man["pricing"]["tool_prices"])
+    assert priced - names == set(), f"ghost prices: {sorted(priced - names)}"
+
+
+def test_free_tools_agrees_with_the_zero_priced_ones():
+    """Two lists saying the same thing is two chances to disagree."""
+    man = _manifest()
+    tp = man["pricing"]["tool_prices"]
+    zero = {n for n, v in tp.items() if v == 0}
+    assert set(man["pricing"]["free_tools"]) == zero
+
+
+def test_the_free_functions_are_the_ones_that_never_call_trello():
+    """The rule behind the 0s, asserted so a later edit must justify itself.
+
+    check_access and list_accounts read credentials this app already holds,
+    get_token_link builds a URL by string concatenation, and connect_account is
+    how a user starts -- charging for the front door is charging for the
+    interface.
+    """
+    man = _manifest()
+    assert set(man["pricing"]["free_tools"]) == {
+        "check_access", "connect_account", "get_token_link", "list_accounts"}
