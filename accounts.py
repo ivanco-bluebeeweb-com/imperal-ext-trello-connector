@@ -187,9 +187,9 @@ def _shape_complaint(key: str, token: str):
             tc.TRELLO_KEY_REJECTED,
             "These look swapped: the API key is the SHORTER value (32 "
             "characters) and it belongs in the key field. Put the longer value "
-            "in the token field, or generate a fresh token from the manual "
-            "'Token' link on the API Key tab at "
-            "trello.com/apps/admin.")
+            "in the token field. If you have no token yet, open the Allow "
+            "prompt for the 32-character value: "
+            + _authorize_url(token))
 
     # The Secret pasted as the key. The Secret is for OAuth signing and will
     # never authorise a REST call, so no amount of retrying helps.
@@ -237,6 +237,27 @@ async def key_is_live(ctx, key: str) -> bool | None:
     if status == 404:
         return False
     return None
+
+
+def _authorize_url(key: str) -> str:
+    """Build the ready-made authorize link for one key.
+
+    Why a link and not instructions. The admin page has no 'Token' control
+    beside the key -- the manual link is buried in a paragraph below it, and
+    Atlassian rearranges that page. Describing furniture that moves is how the
+    connector ended up sending people to a button that was not there, and a
+    user who cannot find it concludes their own page is broken.
+
+    This URL needs nothing but the key: opening it renders Trello's Allow
+    prompt and hands back a token bound to THIS key. `expiration=never` because
+    a stored credential that silently dies in 30 days is a support ticket, and
+    `scope=read,write` because a read-only token would connect happily and then
+    fail on the first card edit -- the worst moment to discover a scope.
+    """
+    return ("https://trello.com/1/authorize?expiration=never"
+            "&scope=read,write&response_type=token"
+            "&name=Imperal%20Trello%20Connector"
+            f"&key={key}")
 
 
 def _shape_note(key: str, token: str, code: str = "",
@@ -314,30 +335,26 @@ def _shape_note(key: str, token: str, code: str = "",
             "though the REST error says 'invalid key'. That wording is what "
             "Trello returns for the whole pair, so the TOKEN is the half at "
             "fault: it was never created, was revoked, has expired, or belongs "
-            "to a different key. Keep this key. Create a token for it at "
-            "trello.com/apps/admin -- your Power-Up, API Key tab, the 'Token' "
-            "'Token' link in the paragraph BELOW the key (the one about "
-            "generating a token manually -- there is no button beside the key "
-            "itself) -- click Allow, and paste what Trello then "
-            "shows. Note the SECRET on that page is not the token: it is for "
-            "OAuth signing and can never authorise a REST call.")
+            "to a different key. Keep this key. Note the SECRET shown under it "
+            "is NOT the token: it signs OAuth and can never authorise a REST "
+            "call. Open this link to create a real token for THIS key, click "
+            "Allow, and paste what Trello shows: "
+            + _authorize_url(key))
     elif code == tc.TRELLO_KEY_REJECTED:
         # key_live is None: the check could not be made. Ignorance is not
         # evidence, so neither half is blamed -- both possibilities are named.
         parts.append(
             "Trello returns 'invalid key' for the pair as a whole, so either "
             "half could be at fault. Check the token first -- it expires and is "
-            "revocable, and it only works with the key that created it. "
-            "Generate a fresh token for THIS key from the manual 'Token' link "
-            "on the API Key tab at "
-            "trello.com/apps/admin before replacing the key itself.")
+            "revocable, and it only works with the key that created it. Get a "
+            "fresh one for THIS key here before replacing the key itself: "
+            + _authorize_url(key))
     else:
         parts.append(
             "Either the token was revoked or expired, or it was generated with "
             "a DIFFERENT key (a token only works with the key that created "
-            "it). Generate a fresh token for THIS key from the manual 'Token' "
-            "link on the API Key tab "
-            "and reconnect.")
+            "it). Open this link to get a fresh token for THIS key, then "
+            "reconnect: " + _authorize_url(key))
     return " ".join(parts), True
 
 

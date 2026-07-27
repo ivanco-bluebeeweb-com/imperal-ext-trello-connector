@@ -276,16 +276,31 @@ async def test_non_hex_characters_are_flagged(ctx, http):
     assert "outside 0-9" in out["error"]
 
 
-async def test_the_shape_note_never_leaks_the_credential(ctx, http):
-    """A credential must not become readable through an error message."""
+async def test_the_shape_note_never_leaks_the_token(ctx, http):
+    """The SECRET half must not become readable through an error message.
+
+    The two halves are not equally sensitive and the rule follows that, rather
+    than banning both out of tidiness:
+
+    * the TOKEN is the secret -- Atlassian says tokens "should be kept secret"
+      because one grants access to the whole account. It never appears, not
+      even a six-character run of it.
+    * the KEY is documented as "intended to be publicly accessible" and
+      identifies only the application. It is allowed in ONE place: the
+      `key=` parameter of the authorize link, which is what makes that link
+      work at all. A link the user cannot use is not worth protecting.
+    """
     http.push("invalid key", status=401)
     secret_key = "feed" + "1" * 28
     out = await acct.add_pair(ctx, secret_key, TEST_TOKEN)
-    assert secret_key not in out["error"]
-    assert TEST_TOKEN not in out["error"]
-    # Not even a prefix: any 6-char run of the real value would be a leak.
-    assert secret_key[:6] not in out["error"]
-    assert TEST_TOKEN[:6] not in out["error"]
+    err = out["error"]
+
+    assert TEST_TOKEN not in err
+    assert TEST_TOKEN[:6] not in err
+
+    # The key may appear ONLY as the authorize link's parameter -- never loose
+    # in the prose, where it would serve no purpose.
+    assert err.count(secret_key) == err.count("key=" + secret_key)
 
 
 async def test_a_correct_shape_does_not_also_say_recopy_the_key(ctx, http):
@@ -388,9 +403,44 @@ async def test_no_message_claims_a_token_link_beside_the_key(ctx, http):
     http.push("<html>Allow</html>", status=200)
     out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
     low = out["error"].lower()
-    # The runtime branches may mention "no button beside the key itself" --
-    # that is the correction, not the fiction. What must never appear is an
-    # instruction to USE a link there.
     assert "link beside the key" not in low
     assert "link beside this key" not in low
-    assert "no button beside the key" in low
+    # The fix went further than correcting the wording: the message no longer
+    # describes the page at all, it hands over a link that needs no navigation.
+    # That is what makes the claim unrepeatable, so it is what gets pinned.
+    assert "trello.com/1/authorize" in low
+
+
+# --- the ready-made authorize link -----------------------------------------
+# The admin page has no 'Token' control beside the key and Atlassian moves that
+# furniture around, so the message hands over a link that needs no navigation.
+
+async def test_the_message_carries_a_working_authorize_link(ctx, http):
+    http.push("invalid key", status=401)
+    http.push("<html>Allow</html>", status=200)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    err = out["error"]
+    assert "trello.com/1/authorize" in err
+    assert f"key={TEST_KEY}" in err
+    # read-only would connect fine and then fail on the first write -- the
+    # worst moment to discover a scope.
+    assert "scope=read,write" in err
+    # a credential that silently dies in 30 days is a support ticket
+    assert "expiration=never" in err
+
+
+async def test_the_authorize_link_never_carries_the_token(ctx, http):
+    """The link is built from the KEY. Putting the token in a URL would leak
+    the secret half into logs, clipboards and browser history."""
+    http.push("invalid key", status=401)
+    http.push("<html>Allow</html>", status=200)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert TEST_TOKEN not in out["error"]
+
+
+async def test_no_doubled_token_word_survives(ctx, http):
+    """A stale fragment once produced "the 'Token' 'Token' link"."""
+    http.push("invalid key", status=401)
+    http.push("<html>Allow</html>", status=200)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert "'Token' 'Token'" not in out["error"]
