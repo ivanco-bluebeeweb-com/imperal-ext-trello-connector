@@ -29,6 +29,7 @@ from models import (
     AccessReport,
     CheckAccessParams,
     GetCardParams,
+    GetTokenLinkParams,
     ListAccountsParams,
     ListBoardsParams,
     ListCardsParams,
@@ -46,6 +47,7 @@ from models import (
     TrelloCardList,
     TrelloChecklist,
     TrelloChecklistList,
+    TokenLink,
     TrelloComment,
     TrelloCommentList,
     TrelloLabel,
@@ -519,6 +521,81 @@ async def search(ctx, params: SearchParams) -> ActionResult:
     return ActionResult.success(
         TrelloSearchHitList(items=hits, total=len(hits)),
         f"{len(hits)} match(es) for '{params.query}'.")
+
+
+@chat.function(
+    "get_token_link",
+    "Turn your Trello API key into a ready-made authorize link, so you can get "
+    "a token without hunting for anything on Trello's page.",
+    action_type="read", chain_callable=True,
+    data_model=TokenLink,
+)
+async def get_token_link(ctx, params: GetTokenLinkParams) -> ActionResult:
+    """Hand back the link that produces a token for a given key.
+
+    Why this exists. The Connect screen asks for a token, but Trello's admin
+    page has no visible control that issues one -- the manual link is buried in
+    a paragraph below the key, and Atlassian moves it. So the token field was a
+    field with no reachable source: the user is told to paste something they
+    cannot obtain. Explaining the page in prose failed twice, because prose
+    about someone else's UI goes stale the moment they redesign it.
+
+    A link cannot go stale the same way: it is Trello's documented authorize
+    endpoint, it needs nothing but the key, and clicking Allow is the ONLY
+    thing that mints a token. This makes the missing half obtainable in one
+    step instead of describing where to click.
+
+    The key is verified first. A dead key still renders an Allow prompt for
+    nothing useful, so catching it here saves the user a pointless round trip.
+    An unavailable check is reported as unverified -- never as a dead key,
+    because not knowing is not evidence.
+    """
+    key = (params.key or "").strip()
+
+    if not key:
+        return _error(
+            "Paste your Trello API key and I will build the link that gives "
+            "you a token for it. The key is on the API Key tab of your Power-Up "
+            "at trello.com/apps/admin.",
+            tc.TRELLO_KEY_MISSING)
+
+    # A wrong-shaped key cannot produce a usable link, and shipping one would
+    # send the user to an Allow prompt that fails after they grant access.
+    if len(key) != 32 or not all(c in "0123456789abcdefABCDEF" for c in key):
+        note, _ = acct._shape_note(key, "", tc.TRELLO_KEY_REJECTED)
+        return _error(note, tc.TRELLO_KEY_REJECTED)
+
+    live = await acct.key_is_live(ctx, key)
+    url = acct._authorize_url(key)
+
+    if live is False:
+        return _error(
+            "Trello does not recognise this key, so a token for it cannot be "
+            "created. Keys from the retired trello.com/app-key page are not "
+            "tied to a Power-Up and stop working. Generate a new key at "
+            "trello.com/apps/admin -- open (or create) a Power-Up, API Key tab, "
+            "'Generate a new API Key' -- then ask me for the link again.",
+            tc.TRELLO_KEY_REJECTED)
+
+    status = "verified -- Trello accepts this key" if live else (
+        "not verified -- the check could not be made, the link is still correct")
+
+    return ActionResult.success(
+        TokenLink(
+            title="Your Trello token link",
+            subtitle="Open it, click Allow, then paste the token you get",
+            authorize_url=url,
+            key_status=status,
+            expiration="never -- the token will not silently die",
+            scope="read and write -- reading boards and editing cards",
+            url=url,
+            next_step=(
+                "Open the link and click Allow. Trello then shows the token -- "
+                "paste it together with this same key to connect. The Secret "
+                "under your key is NOT a token and cannot be used here."),
+        ),
+        "Here is your authorize link -- click Allow and Trello gives you the "
+        "token.")
 
 
 @chat.function(

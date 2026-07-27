@@ -147,19 +147,44 @@ async def connect_panel(ctx, **kwargs):
         ))
 
     children.append(ui.Section(
-        title="1. Get the key and the token",
+        title="1. Copy your API key",
         children=[
             ui.Text(
-                content=("Open the admin page, pick your Power-Up and use the "
-                         "API Key tab. The token is NOT beside the key: use the "
-                         "'Token' link in the paragraph below it, about "
-                         "generating a token manually, then click Allow -- "
-                         "Trello shows the token to copy. If you have no "
-                         "Power-Up yet, create one there first; that is what a "
-                         "key belongs to."),
+                content=("Open the admin page, pick your Power-Up and copy the "
+                         "key from the API Key tab. If you have no Power-Up "
+                         "yet, create one there first -- that is what a key "
+                         "belongs to."),
                 variant="body",
             ),
             ui.Link(label="Open trello.com/apps/admin", href=_KEY_PAGE),
+        ],
+    ))
+
+    # Step 2 exists because the token field had no reachable source. Trello's
+    # page shows no control that issues a token -- the manual link is buried in
+    # a paragraph below the key and Atlassian moves it -- so asking for a token
+    # was asking for something the user could not get. Describing the page in
+    # prose failed twice; handing over a link built from their own key cannot
+    # go stale the same way.
+    children.append(ui.Section(
+        title="2. Turn that key into a token",
+        children=[
+            ui.Text(
+                content=("Paste the key here and I will build your authorize "
+                         "link. Open it, click Allow, and Trello shows the "
+                         "token -- that is the only thing that creates one."),
+                variant="body",
+            ),
+            ui.Form(
+                action="get_token_link",
+                submit_label="Get my token link",
+                children=[
+                    ui.Input(
+                        placeholder="API key (32 hex characters)",
+                        param_name="key",
+                    ),
+                ],
+            ),
             # The SECRET sits directly under the key on that page and is the
             # same 64-hex shape a token has, so pasting it is the single most
             # likely mistake here -- and it fails with Trello's misleading
@@ -168,16 +193,16 @@ async def connect_panel(ctx, **kwargs):
             ui.Alert(
                 type="warning",
                 title="The Secret is not the token",
-                message=("The 'Secret' shown under the key signs OAuth and can "
-                         "never authorise a REST call. A token comes from the "
-                         "Allow prompt and is what belongs in the token "
-                         "field."),
+                message=("The 'Secret' shown under your key signs OAuth and "
+                         "cannot authorise a single Trello call -- verified "
+                         "against the API. Only the Allow prompt issues a "
+                         "token."),
             ),
         ],
     ))
 
     children.append(ui.Section(
-        title="2. Paste both halves",
+        title="3. Paste both halves",
         children=[
             ui.Text(
                 content=("The key is safe to show -- Atlassian documents it as "
@@ -207,7 +232,7 @@ async def connect_panel(ctx, **kwargs):
     ))
 
     children.append(ui.Section(
-        title="3. Check what it reaches",
+        title="4. Check what it reaches",
         children=[
             ui.Text(
                 content=("Trello shows whatever the token's owner can already "

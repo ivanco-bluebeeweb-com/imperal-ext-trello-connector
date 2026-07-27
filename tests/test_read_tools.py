@@ -12,7 +12,7 @@ from conftest import (code_of, succeeded, text_of_result, TEST_KEY, TEST_TOKEN, 
 from models import (ListBoardsParams, ListCardsParams, ListChecklistsParams,
                     ListCommentsParams, ListLabelsParams, ListListsParams,
                     ListMembersParams, GetCardParams, SearchParams,
-                    CheckAccessParams, ListAccountsParams)
+                    CheckAccessParams, ListAccountsParams, GetTokenLinkParams)
 
 
 # --- no credentials ---------------------------------------------------------
@@ -185,3 +185,72 @@ async def test_list_accounts_never_returns_a_credential(connected_ctx, http):
     blob = result.data.model_dump_json()
     assert TEST_TOKEN not in blob
     assert TEST_KEY not in blob
+
+
+
+# --- get_token_link ---------------------------------------------------------
+# The Connect screen asked for a token while Trello's page shows no control
+# that issues one, so the field had no reachable source. This tool makes the
+# missing half obtainable from the half the user already has.
+
+async def test_the_link_is_built_from_the_key(ctx, http):
+    http.push("<html>Allow</html>", status=200)      # authorize page: key live
+    result = await hr.get_token_link(ctx, GetTokenLinkParams(key=TEST_KEY))
+    assert succeeded(result) is True
+    url = result.data.authorize_url
+    assert "trello.com/1/authorize" in url
+    assert f"key={TEST_KEY}" in url
+    # read-only would connect fine and then fail on the first card edit;
+    # a 30-day token would die silently. Both are support tickets.
+    assert "scope=read,write" in url
+    assert "expiration=never" in url
+
+
+async def test_the_link_never_contains_a_token(ctx, http):
+    """The link is built from the KEY. A token in a URL would leak the secret
+    half into history, logs and clipboards."""
+    http.push("<html>Allow</html>", status=200)
+    result = await hr.get_token_link(ctx, GetTokenLinkParams(key=TEST_KEY))
+    assert TEST_TOKEN not in result.data.authorize_url
+    assert "token=" not in result.data.authorize_url
+
+
+async def test_a_dead_key_is_refused_before_the_allow_prompt(ctx, http):
+    """A dead key still renders an Allow prompt that grants nothing usable, so
+    sending the user there would waste the trip."""
+    http.push("", status=404)              # authorize page: key unknown
+    result = await hr.get_token_link(ctx, GetTokenLinkParams(key=TEST_KEY))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_KEY_REJECTED"
+
+
+async def test_an_unavailable_check_still_returns_the_link(ctx, http):
+    """Not knowing is not evidence: a failed check must not be reported as a
+    dead key, and the link is correct regardless."""
+    http.push("", status=500)              # neither 200 nor 404 -> unknown
+    result = await hr.get_token_link(ctx, GetTokenLinkParams(key=TEST_KEY))
+    assert succeeded(result) is True
+    assert "not verified" in result.data.key_status
+    assert f"key={TEST_KEY}" in result.data.authorize_url
+
+
+async def test_the_secret_pasted_as_a_key_is_caught(ctx, http):
+    """The Secret is 64 hex and sits under the key, so it gets pasted here.
+    Verified against the live API: it cannot authorise any call."""
+    result = await hr.get_token_link(ctx, GetTokenLinkParams(key="e" * 64))
+    assert succeeded(result) is False
+    # No pointless authorize round trip for a value that cannot be a key.
+    assert http.calls == []
+
+
+async def test_an_empty_key_asks_for_it_plainly(ctx, http):
+    result = await hr.get_token_link(ctx, GetTokenLinkParams(key=""))
+    assert succeeded(result) is False
+    assert http.calls == []
+
+
+async def test_the_result_warns_the_secret_is_not_a_token(ctx, http):
+    """The single most likely mistake, named where the token is handed over."""
+    http.push("<html>Allow</html>", status=200)
+    result = await hr.get_token_link(ctx, GetTokenLinkParams(key=TEST_KEY))
+    assert "secret" in result.data.next_step.lower()

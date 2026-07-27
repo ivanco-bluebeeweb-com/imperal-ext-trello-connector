@@ -1299,6 +1299,128 @@
       "owner_chat_tool": "trello"
     },
     {
+      "name": "get_token_link",
+      "description": "Turn your Trello API key into a ready-made authorize link, so you can get a token without hunting for anything on Trello's page.",
+      "action_type": "read",
+      "chain_callable": true,
+      "effects": [],
+      "id_projection": "",
+      "params_schema": {
+        "description": "Just the key -- the one thing the user definitely has.\n\nNot BoardScoped and no token field: this runs BEFORE a token exists. Asking\nfor one here would be the circular request that made the Connect screen\nunusable -- a field the user had no way to fill.",
+        "properties": {
+          "key": {
+            "default": "",
+            "description": "Your Trello API key -- 32 hex characters, from the API Key tab of your Power-Up at trello.com/apps/admin.",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "title": "GetTokenLinkParams",
+        "type": "object"
+      },
+      "return_schema": {
+        "description": "A ready-made authorize link, plus whether the key behind it is real.\n\nThe whole point is that the user does not have to find anything on\nTrello's page: they open this link, click Allow, and Trello hands them the\ntoken. `key_status` is checked first so a dead key is caught here rather\nthan after a pointless round trip through the Allow prompt.",
+        "properties": {
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subtitle"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "authorize_url": {
+            "default": "",
+            "title": "Authorize Url",
+            "type": "string"
+          },
+          "key_status": {
+            "default": "",
+            "title": "Key Status",
+            "type": "string"
+          },
+          "expiration": {
+            "default": "",
+            "title": "Expiration",
+            "type": "string"
+          },
+          "scope": {
+            "default": "",
+            "title": "Scope",
+            "type": "string"
+          },
+          "next_step": {
+            "default": "",
+            "title": "Next Step",
+            "type": "string"
+          }
+        },
+        "title": "TokenLink",
+        "type": "object",
+        "x-sdl": "entity"
+      },
+      "event": "",
+      "background": false,
+      "long_running": false,
+      "scopes": [],
+      "owner_chat_tool": "trello"
+    },
+    {
       "name": "check_access",
       "description": "Report what this connector can currently reach in Trello, and explain anything missing.",
       "action_type": "read",

@@ -392,6 +392,33 @@ class TrelloSearchHitList(sdl.EntityList[TrelloSearchHit]):
     pass
 
 
+class GetTokenLinkParams(BaseModel):
+    """Just the key -- the one thing the user definitely has.
+
+    Not BoardScoped and no token field: this runs BEFORE a token exists. Asking
+    for one here would be the circular request that made the Connect screen
+    unusable -- a field the user had no way to fill.
+    """
+    key: str = Field(
+        "", description="Your Trello API key -- 32 hex characters, from the "
+                        "API Key tab of your Power-Up at trello.com/apps/admin.")
+
+
+class TokenLink(_Displayable):
+    """A ready-made authorize link, plus whether the key behind it is real.
+
+    The whole point is that the user does not have to find anything on
+    Trello's page: they open this link, click Allow, and Trello hands them the
+    token. `key_status` is checked first so a dead key is caught here rather
+    than after a pointless round trip through the Allow prompt.
+    """
+    authorize_url: str = ""
+    key_status: str = ""
+    expiration: str = ""
+    scope: str = ""
+    next_step: str = ""
+
+
 class AccessReport(_Displayable):
     """What the connector can currently reach, and why anything is missing.
 
