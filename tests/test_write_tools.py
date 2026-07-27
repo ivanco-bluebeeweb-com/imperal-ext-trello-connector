@@ -736,6 +736,31 @@ async def test_number_field_value_is_a_string(connected_ctx, http):
     assert isinstance(body["value"]["number"], str)
 
 
+async def test_clearing_a_dropdown_unsets_the_option_id(connected_ctx, http):
+    """A dropdown has no `value` to empty -- it has an option id to unset.
+
+    REGRESSION TEST for a live 400 ("Invalid custom field item value"). Clearing
+    was written as one shape for every type, {"value": {}}, which works for text,
+    number, date and checkbox and is rejected for a dropdown: the spec defines
+    the body as a oneOf where a list-type field carries `idValue` and never
+    `value`. The type has to decide the clear body just as it decides the set
+    body.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload()])          # type "list", with options
+    http.push({})
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="Priority", clear=True))
+    assert succeeded(result) is True
+    assert http.last_method() == "PUT"
+    body = http.last_body()
+    assert "idValue" in body
+    # `value` must be absent entirely: the two shapes are mutually exclusive.
+    assert "value" not in body
+
+
 async def test_clearing_a_field_is_an_empty_put_not_a_delete(
         connected_ctx, http):
     """Trello has no delete route for a card's field value."""

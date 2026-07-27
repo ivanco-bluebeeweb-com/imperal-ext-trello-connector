@@ -1932,9 +1932,10 @@ async def create_custom_field(ctx, params: CreateCustomFieldParams) -> ActionRes
 async def set_custom_field(ctx, params: SetCustomFieldParams) -> ActionResult:
     """Set one custom field value on one card, or clear it.
 
-    CLEARING IS AN EMPTY PUT, not a DELETE -- Trello has no delete route for a
-    card's field value, and sending one 404s in a way that reads like the card
-    is missing.
+    CLEARING IS A PUT, not a DELETE -- Trello has no delete route for a card's
+    field value, and sending one 404s in a way that reads like the card is
+    missing. The BODY of that PUT depends on the field type: a scalar is emptied
+    with {"value": {}}, a dropdown by unsetting its option id.
     """
     creds, board, err = await _resolve(ctx, params.board)
     if err:
@@ -1952,8 +1953,17 @@ async def set_custom_field(ctx, params: SetCustomFieldParams) -> ActionResult:
     path = f"cards/{card['id']}/customField/{field['id']}/item"
 
     if params.clear:
-        # An empty value object is how Trello removes a value.
-        out = await tc.request(ctx, "PUT", path, creds, data={"value": {}})
+        # CLEARING IS TYPE-DEPENDENT TOO, which the first version missed. The
+        # spec defines the body as a oneOf: a scalar carries {"value": {...}},
+        # a dropdown carries {"idValue": ...}, and the two are mutually
+        # exclusive. Sending {"value": {}} at a dropdown is rejected live with
+        # "Invalid custom field item value" -- because a dropdown has no `value`
+        # to empty; it has an option id to unset.
+        clear_body: dict = (
+            {"idValue": ""}
+            if (field.get("field_type") or "").strip().lower() == "list"
+            else {"value": {}})
+        out = await tc.request(ctx, "PUT", path, creds, data=clear_body)
         if not out.get("ok"):
             return _from_envelope(out)
         return ActionResult.success(
