@@ -88,15 +88,23 @@ async def list_accounts(ctx, params: ListAccountsParams) -> ActionResult:
             "Allow prompt for that key. Paste them on the Connect screen.",
             tc.TRELLO_CREDENTIALS_MISSING)
 
+    # The keys below are the ones `accounts.list_accounts` actually writes.
+    # This read used `account_name` and `board_count`, which that function never
+    # produces -- it stores `member_name` and a `boards` LIST. Both silently
+    # defaulted, so every account listed as an unnamed row with 0 boards even
+    # when the credential worked and boards were reachable. Reading a key that
+    # is never written is invisible: no error, just a plausible wrong answer.
     items = [
         TrelloAccount(
             slot=e.get("slot", 0),
-            account_name=e.get("account_name", ""),
+            title=str(e.get("member_name") or "") or "(unnamed account)",
+            account_name=str(e.get("member_name") or ""),
             username=e.get("username", ""),
             email=e.get("email", ""),
-            board_count=e.get("board_count", 0),
+            board_count=len(e["boards"]) if isinstance(e.get("boards"), list)
+            else 0,
             status=e.get("status", ""),
-            detail=e.get("detail", ""),
+            detail=str(e.get("error") or ""),
         )
         for e in entries
     ]
@@ -171,6 +179,12 @@ async def list_lists(ctx, params: ListListsParams) -> ActionResult:
     # boolean. Sending `closed=false` is silently ignored, which is how a
     # request for open lists comes back including the archived ones.
     query["filter"] = "all" if params.include_closed else "open"
+    # Embed the cards so each column can report how full it is. Only their ids
+    # are fetched: the count is all that is displayed, and pulling whole cards
+    # here would drag a board's entire contents through a request that was
+    # asked only "what columns exist".
+    query["cards"] = "all" if params.include_closed else "open"
+    query["card_fields"] = "id"
 
     out = await tc.request(ctx, "GET", f"boards/{board['id']}/lists", creds,
                            params=query)
@@ -233,7 +247,22 @@ async def list_cards(ctx, params: ListCardsParams) -> ActionResult:
             TrelloCardList(items=[], total=0),
             f"No cards in {where}. {ACCESS_NOTE}")
 
-    items = [_card_entity(c) for c in cards]
+    # Trello returns `idList` on a card and offers no way to embed the column
+    # itself, so the names are fetched once and mapped. A failure here is NOT
+    # promoted to an error: the cards were retrieved, and losing the column
+    # label is a smaller loss than refusing to show the board at all.
+    list_names: dict = {}
+    if any(str(c.get("idList") or "") for c in cards if isinstance(c, dict)):
+        cols = await tc.request(ctx, "GET", f"boards/{board['id']}/lists",
+                                creds, params={"filter": "all",
+                                               "fields": "id,name"})
+        if cols.get("ok"):
+            list_names = {
+                str(r.get("id") or ""): str(r.get("name") or "")
+                for r in (cols.get("data") or []) if isinstance(r, dict)
+            }
+
+    items = [_card_entity(c, list_names) for c in cards]
     more = " (more available)" if out.get("maybe_more") else ""
     return ActionResult.success(
         TrelloCardList(items=items, total=len(items)),

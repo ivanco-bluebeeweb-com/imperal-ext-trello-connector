@@ -122,3 +122,55 @@ def test_helpers_do_not_import_models_at_call_time():
     # A lazy `from models import X` leaves the module name in the function's
     # constants; a module-level import does not.
     assert "models" not in source
+
+
+def test_card_entity_names_the_column_from_the_id_map():
+    """A card must say WHICH column it sits in.
+
+    Trello's "cards on a board" route does not accept a `list=true` parameter
+    (checked against Atlassian's docs, not assumed), so the response carries
+    only `idList`. The flattener read a nested `list` object that never arrives,
+    so every card came back with an empty `list_name` -- a board full of cards
+    that all looked homeless.
+    """
+    names = {"L_today": "Today", "L_later": "Later"}
+
+    card = shared.card_entity(
+        {"id": "C1", "name": "Draft the audit", "idList": "L_today"}, names)
+
+    assert card.list_name == "Today"
+
+
+def test_card_entity_leaves_the_column_blank_when_unknown():
+    """An unmapped id yields "", never the raw id.
+
+    Falling back to the id would put `L_today` in a human-facing column field --
+    noise that reads like a name but is not one.
+    """
+    card = shared.card_entity(
+        {"id": "C1", "name": "Orphan", "idList": "L_gone"}, {"L_x": "X"})
+
+    assert card.list_name == ""
+
+
+def test_card_entity_still_works_without_a_map():
+    """`get_card` calls this with one argument and must keep working."""
+    card = shared.card_entity({"id": "C1", "name": "Solo", "idList": "L1"})
+
+    assert card.name == "Solo"
+    assert card.list_name == ""
+
+
+def test_list_entity_counts_embedded_cards():
+    """`card_count` comes from the embedded array, when it was requested."""
+    col = shared.list_entity(
+        {"id": "L1", "name": "Today", "cards": [{"id": "a"}, {"id": "b"}]})
+
+    assert col.card_count == 2
+
+
+def test_list_entity_counts_zero_when_cards_absent():
+    """Without `cards=open`, Trello says nothing -- so the count stays 0."""
+    col = shared.list_entity({"id": "L1", "name": "Today"})
+
+    assert col.card_count == 0

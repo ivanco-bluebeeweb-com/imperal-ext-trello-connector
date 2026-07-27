@@ -187,6 +187,27 @@ async def test_list_accounts_never_returns_a_credential(connected_ctx, http):
     assert TEST_KEY not in blob
 
 
+async def test_list_accounts_names_the_account_and_counts_its_boards(
+        connected_ctx, http):
+    """The row must carry the owner's name and a real board count.
+
+    `accounts.list_accounts` stores `member_name` and a `boards` LIST; this
+    handler read `account_name` and `board_count`, keys that function never
+    writes. Both defaulted quietly, so a working credential with a reachable
+    board listed as an unnamed account with 0 boards -- which reads as "the
+    token sees nothing", the exact thing a user checks this tool to rule out.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    result = await hr.list_accounts(connected_ctx, ListAccountsParams())
+    assert succeeded(result) is True
+
+    row = result.data.items[0]
+    assert row.account_name == "Vlad Ivanco"
+    assert row.title == "Vlad Ivanco"
+    assert row.board_count == 1
+
+
 
 # --- get_token_link ---------------------------------------------------------
 # The Connect screen asked for a token while Trello's page shows no control

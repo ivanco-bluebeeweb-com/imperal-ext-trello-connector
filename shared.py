@@ -169,31 +169,54 @@ def board_entity(row) -> "object":
 
 
 def list_entity(row) -> "object":
-    """Flatten a Trello list (column) into its display entity."""
+    """Flatten a Trello list (column) into its display entity.
+
+    `card_count` is filled only when the caller asked Trello to embed the cards
+    (`cards=open` on the lists route). Without that, Trello says nothing about
+    how full a column is -- and a hardcoded 0 is worse than an absent number,
+    because "Today: 0 cards" reads as an empty column rather than as "not
+    counted". So the count comes from the embedded array when it is there.
+    """
     data = row if isinstance(row, dict) else {}
+    cards = data.get("cards")
     return TrelloList(
         id=to.id_of(data),
         title=to.name_of(data) or "(unnamed list)",
         name=to.name_of(data),
         closed=bool(data.get("closed")),
         board=str(data.get("idBoard") or ""),
+        card_count=len(cards) if isinstance(cards, list) else 0,
     )
 
 
-def card_entity(row) -> "object":
+def card_entity(row, list_names: dict | None = None) -> "object":
     """Flatten a Trello card into its display entity.
 
     Every field is read defensively: Trello only returns what `fields` asked
     for, and a nested `members`/`labels` array is present only when the caller
     requested it. A missing piece yields "" rather than a guess.
+
+    `list_names` maps list id -> list name. It exists because Trello's "get
+    cards on a board" route does NOT accept a `list=true` parameter -- that was
+    checked against Atlassian's docs, not assumed -- so a card arrives carrying
+    `idList` and nothing else about its column. Reading a nested `list` object
+    (as this used to) therefore always yielded "", and every card displayed
+    with a blank column: on a board whose whole meaning is Today / This Week /
+    Later, that erases the only field that says what is urgent. The mapping is
+    supplied by the caller so it costs ONE request per listing rather than one
+    per card.
     """
     data = row if isinstance(row, dict) else {}
+    nested = data.get("list")
+    resolved = to.name_of(nested) if isinstance(nested, dict) else ""
+    if not resolved and list_names:
+        resolved = str(list_names.get(str(data.get("idList") or "")) or "")
     badges = data.get("badges") if isinstance(data.get("badges"), dict) else {}
     return TrelloCard(
         id=to.id_of(data),
         title=to.name_of(data) or "(unnamed card)",
         name=to.name_of(data),
-        list_name=to.name_of(data.get("list")) if data.get("list") else "",
+        list_name=resolved,
         closed=bool(data.get("closed")),
         due=str(data.get("due") or ""),
         due_complete=bool(data.get("dueComplete")),
