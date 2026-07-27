@@ -233,21 +233,25 @@ def _shape_note(key: str, token: str) -> str:
             f"A Trello API key is exactly 32 characters, so a {len(key)}-"
             "character value is not one -- check you copied the API Key field "
             "itself and not a surrounding label, URL or partial selection.")
-    elif not key_hex:
+        return " ".join(parts), False
+    if not key_hex:
         parts.append(
             "The key is the right length but contains characters outside 0-9 "
             "and a-f, which a Trello key never does -- something extra was "
             "picked up in the copy.")
-    else:
-        # The key is exactly the right shape, so the paste is not the problem:
-        # this is a revoked/expired credential or a key-token mismatch.
-        parts.append(
-            "The key is exactly the right shape, so the paste is fine -- this "
-            "is a credential problem, not a typing one. Either the token was "
-            "revoked or expired, or the token was generated with a DIFFERENT "
-            "key (a token only works with the key that created it). Generate a "
-            "fresh token from the Token link beside THIS key and reconnect.")
-    return " ".join(parts)
+        return " ".join(parts), False
+
+    # The key is exactly the right shape, so the paste is not the problem: this
+    # is a revoked/expired credential or a key-token mismatch. The stock advice
+    # would tell the user to re-copy a key that is already correct, so this
+    # note supersedes it.
+    parts.append(
+        "The key is exactly the right shape, so the paste is fine -- this "
+        "is a credential problem, not a typing one. Either the token was "
+        "revoked or expired, or the token was generated with a DIFFERENT "
+        "key (a token only works with the key that created it). Generate a "
+        "fresh token from the Token link beside THIS key and reconnect.")
+    return " ".join(parts), True
 
 
 async def add_pair(ctx, key: str, token: str) -> dict:
@@ -288,10 +292,12 @@ async def add_pair(ctx, key: str, token: str) -> dict:
         # That is a dead end: re-copying a correct key changes nothing and the
         # user has no way to tell which case they are in. Describing the
         # OBSERVED SHAPE turns the second attempt into a diagnosis.
-        return tc.fail(
-            info.get("code") or tc.TRELLO_TOKEN_REJECTED,
-            (info.get("error") or tc.message_for(tc.TRELLO_TOKEN_REJECTED))
-            + " " + _shape_note(key, token))
+        note, supersedes = _shape_note(key, token)
+        stock = info.get("error") or tc.message_for(tc.TRELLO_TOKEN_REJECTED)
+        # When the note has established the paste is fine, the stock line
+        # ("copy the key from the API Key tab") contradicts it -- so it goes.
+        return tc.fail(info.get("code") or tc.TRELLO_TOKEN_REJECTED,
+                       note if supersedes else f"{stock} {note}")
 
     existing = await read_pairs(ctx)
     if not existing.get("ok"):

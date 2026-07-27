@@ -268,3 +268,25 @@ async def test_the_shape_note_never_leaks_the_credential(ctx, http):
     # Not even a prefix: any 6-char run of the real value would be a leak.
     assert secret_key[:6] not in out["error"]
     assert TEST_TOKEN[:6] not in out["error"]
+
+
+async def test_a_correct_shape_does_not_also_say_recopy_the_key(ctx, http):
+    """One conclusion per message.
+
+    Trello's stock line for this code opens with "copy it from the API Key
+    tab". When the note has just established the key is exactly right, keeping
+    that line means the message says both "your paste is fine" and "re-paste
+    it" -- and the user follows the wrong half.
+    """
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is False
+    assert "API Key tab" not in out["error"]
+    assert "the paste is fine" in out["error"]
+
+
+async def test_a_wrong_shape_still_keeps_the_stock_advice(ctx, http):
+    """The opposite case: pointing at the API Key tab is exactly right here."""
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, "abcd1234", TEST_TOKEN)
+    assert "API Key tab" in out["error"]
