@@ -187,7 +187,8 @@ def _shape_complaint(key: str, token: str):
             tc.TRELLO_KEY_REJECTED,
             "These look swapped: the API key is the SHORTER value (32 "
             "characters) and it belongs in the key field. Put the longer value "
-            "in the token field, or generate a fresh token beside the key at "
+            "in the token field, or generate a fresh token from the manual "
+            "'Token' link on the API Key tab at "
             "trello.com/apps/admin.")
 
     # The Secret pasted as the key. The Secret is for OAuth signing and will
@@ -300,7 +301,8 @@ def _shape_note(key: str, token: str, code: str = "",
             "cannot be migrated, so a new token will not help. Generate a NEW "
             "key at trello.com/apps/admin -- open (or create) a Power-Up, API "
             "Key tab, 'Generate a new API Key' -- then create a token from the "
-            "link beside that new key and paste both.")
+            "'Token' link in the paragraph BELOW the key -- the one about "
+            "generating a token manually -- and paste both.")
     elif code == tc.TRELLO_KEY_REJECTED and key_live is True:
         # The decisive case. Trello's REST error says "invalid key" even when
         # the key is perfectly good and only the TOKEN is bad -- verified
@@ -314,7 +316,9 @@ def _shape_note(key: str, token: str, code: str = "",
             "fault: it was never created, was revoked, has expired, or belongs "
             "to a different key. Keep this key. Create a token for it at "
             "trello.com/apps/admin -- your Power-Up, API Key tab, the 'Token' "
-            "link beside the key -- click Allow, and paste what Trello then "
+            "'Token' link in the paragraph BELOW the key (the one about "
+            "generating a token manually -- there is no button beside the key "
+            "itself) -- click Allow, and paste what Trello then "
             "shows. Note the SECRET on that page is not the token: it is for "
             "OAuth signing and can never authorise a REST call.")
     elif code == tc.TRELLO_KEY_REJECTED:
@@ -324,13 +328,15 @@ def _shape_note(key: str, token: str, code: str = "",
             "Trello returns 'invalid key' for the pair as a whole, so either "
             "half could be at fault. Check the token first -- it expires and is "
             "revocable, and it only works with the key that created it. "
-            "Generate a fresh token from the Token link beside THIS key at "
+            "Generate a fresh token for THIS key from the manual 'Token' link "
+            "on the API Key tab at "
             "trello.com/apps/admin before replacing the key itself.")
     else:
         parts.append(
             "Either the token was revoked or expired, or it was generated with "
             "a DIFFERENT key (a token only works with the key that created "
-            "it). Generate a fresh token from the Token link beside THIS key "
+            "it). Generate a fresh token for THIS key from the manual 'Token' "
+            "link on the API Key tab "
             "and reconnect.")
     return " ".join(parts), True
 

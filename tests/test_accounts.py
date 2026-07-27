@@ -366,3 +366,31 @@ async def test_a_wrong_shaped_key_skips_the_extra_call(ctx, http):
     out = await acct.add_pair(ctx, "abcd1234", TEST_TOKEN)
     assert out["ok"] is False
     assert len(http.calls) == 1
+
+
+async def test_no_message_claims_a_token_link_beside_the_key(ctx, http):
+    """The instruction has to match the page the user is looking at.
+
+    Seven messages told the user to click a 'Token' link BESIDE the key. The
+    admin page has no such control: the manual-token link sits in a paragraph
+    BELOW the key. Directing someone to a button that is not there is worse
+    than saying nothing, because they conclude their page is broken.
+    """
+    import trello_client as _tc
+    for code, text in _tc._MESSAGES.items():
+        low = text.lower()
+        assert "beside it" not in low, code
+        assert "beside the key" not in low, code
+        assert "beside this key" not in low, code
+
+    # And the same for the live rejection branches, which are built at runtime.
+    http.push("invalid key", status=401)
+    http.push("<html>Allow</html>", status=200)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    low = out["error"].lower()
+    # The runtime branches may mention "no button beside the key itself" --
+    # that is the correction, not the fiction. What must never appear is an
+    # instruction to USE a link there.
+    assert "link beside the key" not in low
+    assert "link beside this key" not in low
+    assert "no button beside the key" in low

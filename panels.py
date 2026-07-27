@@ -151,13 +151,28 @@ async def connect_panel(ctx, **kwargs):
         children=[
             ui.Text(
                 content=("Open the admin page, pick your Power-Up and use the "
-                         "API Key tab. Then click the 'Token' link beside the "
-                         "key and allow access -- Trello shows the token to "
-                         "copy. If you have no Power-Up yet, create one there "
-                         "first; that is what a key belongs to."),
+                         "API Key tab. The token is NOT beside the key: use the "
+                         "'Token' link in the paragraph below it, about "
+                         "generating a token manually, then click Allow -- "
+                         "Trello shows the token to copy. If you have no "
+                         "Power-Up yet, create one there first; that is what a "
+                         "key belongs to."),
                 variant="body",
             ),
             ui.Link(label="Open trello.com/apps/admin", href=_KEY_PAGE),
+            # The SECRET sits directly under the key on that page and is the
+            # same 64-hex shape a token has, so pasting it is the single most
+            # likely mistake here -- and it fails with Trello's misleading
+            # "invalid key". Naming it on the screen where the paste happens
+            # is worth more than explaining it in the error afterwards.
+            ui.Alert(
+                type="warning",
+                title="The Secret is not the token",
+                message=("The 'Secret' shown under the key signs OAuth and can "
+                         "never authorise a REST call. A token comes from the "
+                         "Allow prompt and is what belongs in the token "
+                         "field."),
+            ),
         ],
     ))
 

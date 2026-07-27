@@ -92,7 +92,7 @@ _MESSAGES = {
     ),
     TRELLO_TOKEN_MISSING: (
         "The token is missing. On the same page as your API key, click the "
-        "'Token' link beside it and allow access -- Trello then shows the "
+        "manual 'Token' link on that tab and allow access -- Trello then shows the "
         "token to copy."
     ),
     TRELLO_TOKEN_REJECTED: (
