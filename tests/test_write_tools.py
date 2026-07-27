@@ -1037,3 +1037,41 @@ async def test_vote_401_without_a_disabled_pref_stays_an_auth_failure(
     result = await hw.set_vote(connected_ctx, VoteParams(card="Fix hero"))
     assert succeeded(result) is False
     assert code_of(result) == "TRELLO_SCOPE_INSUFFICIENT"
+
+
+async def test_checkbox_result_reports_what_trello_stored(connected_ctx, http):
+    """The summary must not echo the raw input when it was normalised.
+
+    Setting a checkbox to "yes" stores `true`. Echoing "yes" back read as if
+    Trello held the string "yes" -- close enough to look right, wrong enough to
+    mislead anyone comparing the reply against the card.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload(name="Reviewed", field_type="checkbox",
+                                    with_options=False)])
+    http.push({})
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="Reviewed", value="yes"))
+    assert succeeded(result) is True
+    text = text_of_result(result).lower()
+    assert "true" in text
+    assert "'yes'" not in text
+
+
+async def test_dropdown_result_shows_the_option_text_not_its_id(
+        connected_ctx, http):
+    """Honesty cuts both ways: an option ID is not a useful thing to show."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload()])
+    http.push({})
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="Priority", value="High"))
+    assert succeeded(result) is True
+    text = text_of_result(result)
+    assert "High" in text
+    # The raw option id must not leak into the summary.
+    assert "bb" + "2" * 22 not in text

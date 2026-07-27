@@ -1998,14 +1998,28 @@ async def set_custom_field(ctx, params: SetCustomFieldParams) -> ActionResult:
     if not out.get("ok"):
         return _from_envelope(out)
 
+    # REPORT WHAT TRELLO STORED, not what was typed. `custom_field_body` has
+    # already normalised the input -- "yes" becomes "true" on a checkbox, and a
+    # dropdown's text became an option id -- so echoing the raw input said
+    # "set to 'yes'" for a field whose stored value is `true`. Close enough to
+    # look right, wrong enough to mislead anyone comparing it against the card.
+    stored = params.value
+    if "idValue" in body:
+        # Dropdown: the option TEXT is the honest thing to show, not its id.
+        stored = params.value
+    else:
+        inner = body.get("value") or {}
+        if inner:
+            stored = str(next(iter(inner.values())))
+
     return ActionResult.success(
         WriteResult(
             id=field["id"],
             name=field.get("name", ""),
             action="updated",
-            detail=f"set to '{params.value}' on '{card.get('name', 'card')}'",
+            detail=f"set to '{stored}' on '{card.get('name', 'card')}'",
         ),
-        f"Set '{field.get('name', '')}' to '{params.value}' on "
+        f"Set '{field.get('name', '')}' to '{stored}' on "
         f"'{card.get('name', 'card')}'.")
 
 
