@@ -102,22 +102,33 @@ async def connect_panel(ctx, **kwargs):
 
     NOT a panel of its own: it is one VIEW of the single center panel below.
 
+    FOUR steps, not three. The old screen asked for the pair in one go, but
+    only the key is actually to hand: Trello's page shows no control that
+    issues a token, so step 2 now MAKES the token gettable from the key
+    instead of assuming the user already has one.
+
     SKETCH -- connect screen (props checked against ui-components-reference)
       ui.Stack (v, gap=4)
         ui.Header(text="Connect Trello", level=2, subtitle=...)
         ui.Alert(...)                       -- already-connected notice, if any
-        ui.Section(title="1. Get the pair", children=[
+        ui.Section(title="1. Copy your API key", children=[
           ui.Text(content=..., variant="body")
           ui.Link(label="Open trello.com/apps/admin", href=_KEY_PAGE)
         ])
-        ui.Section(title="2. Paste both halves", children=[
+        ui.Section(title="2. Turn that key into a token", children=[
+          ui.Text(content=..., variant="body")
+          ui.Form(action="get_token_link", submit_label="Get my token link",
+                  children=[ui.Input(placeholder="API key", param_name="key")])
+          ui.Alert(type="warning", title="The Secret is not the token", ...)
+        ])
+        ui.Section(title="3. Paste both halves", children=[
           ui.Form(action="connect_account", submit_label="Connect", children=[
             ui.Input(placeholder="API key", param_name="key")
-            ui.Password(placeholder="token", param_name="token")
+            ui.Password(placeholder="Token", param_name="token")
           ])
           ui.Link(label="Or manage stored credentials directly", href=...)
         ])
-        ui.Section(title="3. Check what it reaches", children=[
+        ui.Section(title="4. Check what it reaches", children=[
           ui.Button(label="Check what is reachable", ...)
         ])
 
