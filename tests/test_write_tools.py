@@ -4,7 +4,7 @@ These pin the four Trello shapes that a PATCH-and-envelope habit gets wrong:
 
 * an update is PUT, not PATCH;
 * the body is the fields themselves, with no `data` wrapper;
-* a comment is posted to `actionsComments`, not to a comment resource;
+* a comment is posted to `actions/comments`, not to a comment resource;
 * a cross-board move must send `idBoard` AND `idList`.
 
 Plus the rule that matters more than any of them: a name is resolved to an id
@@ -238,8 +238,15 @@ async def test_comment_posts_to_actions_comments(connected_ctx, http):
     result = await hw.add_comment(connected_ctx, AddCommentParams(
         card="Fix hero", comment="Ship it"))
     assert succeeded(result) is True
-    assert http.last_path().endswith("/actionsComments")
-    assert http.last_body() == {"text": "Ship it"}
+    # Asserted against Atlassian's documented route. This test previously
+    # pinned `/actionsComments`, which does not exist -- so the suite was green
+    # while every live comment 404'd. A test that agrees with the bug is worse
+    # than no test: it defends the bug from being noticed.
+    assert http.last_path().endswith("/actions/comments")
+    # The text rides in the QUERY string, which is where Atlassian documents it
+    # for this route. It was previously sent as a JSON body -- accepted by the
+    # double, ignored by Trello.
+    assert http.last_params().get("text") == "Ship it"
 
 
 async def test_empty_comment_is_refused_before_the_call(connected_ctx, http):

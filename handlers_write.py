@@ -9,7 +9,7 @@ Four Trello shapes drive this file, all verified against the docs:
 * NO REQUEST ENVELOPE. Unlike Asana's `{"data": {...}}`, a Trello write body is
   the fields themselves. `trello_client.request` sends `data` as the JSON body
   and always appends `key`/`token` to the query string.
-* A COMMENT IS AN ACTION. Posting one is `POST /cards/{id}/actionsComments`
+* A COMMENT IS AN ACTION. Posting one is `POST /cards/{id}/actions/comments`
   with `text` -- there is no comment resource to create.
 * MOVING ACROSS BOARDS NEEDS BOTH IDS. `idList` alone is not enough when the
   destination is on another board: Trello requires `idBoard` too, and a list id
@@ -446,7 +446,7 @@ async def add_comment(ctx, params: AddCommentParams) -> ActionResult:
     """Post a comment on a card.
 
     Trello has no comment resource: this creates an ACTION of type
-    `commentCard` via `/cards/{id}/actionsComments`, which is why the response
+    `commentCard` via `/cards/{id}/actions/comments`, which is why the response
     carries an action id rather than a comment id.
 
     The text is checked BEFORE any lookup. An empty comment is knowably invalid
@@ -467,8 +467,13 @@ async def add_comment(ctx, params: AddCommentParams) -> ActionResult:
     if not card.get("ok"):
         return _from_envelope(card)
 
-    out = await tc.request(ctx, "POST", f"cards/{card['id']}/actionsComments",
-                           creds, data={"text": params.comment})
+    # The path is `actions/comments`, with the slash. `actionsComments` -- the
+    # spelling used here originally -- is not a Trello route at all: it 404s,
+    # and the 404 reads as "no such card", blaming a card that was just
+    # resolved successfully. The text rides as a QUERY parameter, which is the
+    # placement Atlassian documents for this route.
+    out = await tc.request(ctx, "POST", f"cards/{card['id']}/actions/comments",
+                           creds, params={"text": params.comment})
     if not out.get("ok"):
         return _from_envelope(out)
 
