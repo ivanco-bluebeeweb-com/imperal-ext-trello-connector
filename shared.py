@@ -13,6 +13,19 @@ from imperal_sdk import ActionResult
 
 import accounts as acct
 import trello_client as tc
+import trello_objects as to
+from models import TrelloBoard, TrelloCard, TrelloList
+
+# These are imported AT MODULE LEVEL, deliberately. They were once imported
+# lazily inside each function, which looked harmless -- `models` has no
+# dependency back on this package, so there is no cycle to break. But an
+# extension runs alongside its siblings, and a bare `from models import X`
+# evaluated at CALL time resolves against whatever `models` module already sits
+# in the interpreter's cache -- another extension's `models.py`. The failure was
+# intermittent and blamed a stranger: "cannot import name 'TrelloCard' from
+# 'models' (/opt/extensions/wp-site-connector-extension/models.py)". Resolving
+# the name at IMPORT time, while this app's own path is what loaded it, is what
+# makes the binding ours.
 
 
 # The one sentence that explains Trello's access model. Reused verbatim wherever
@@ -141,8 +154,6 @@ def board_entity(row) -> "object":
     return boards, and a divergent flattening is how the same board ends up
     looking different depending on which tool produced it.
     """
-    from models import TrelloBoard
-    import trello_objects as to
     return TrelloBoard(
         id=to.id_of(row),
         # `title` is what the card RENDERS; `name` is what the next tool in a
@@ -159,8 +170,6 @@ def board_entity(row) -> "object":
 
 def list_entity(row) -> "object":
     """Flatten a Trello list (column) into its display entity."""
-    from models import TrelloList
-    import trello_objects as to
     data = row if isinstance(row, dict) else {}
     return TrelloList(
         id=to.id_of(data),
@@ -178,8 +187,6 @@ def card_entity(row) -> "object":
     for, and a nested `members`/`labels` array is present only when the caller
     requested it. A missing piece yields "" rather than a guess.
     """
-    from models import TrelloCard
-    import trello_objects as to
     data = row if isinstance(row, dict) else {}
     badges = data.get("badges") if isinstance(data.get("badges"), dict) else {}
     return TrelloCard(
@@ -215,7 +222,6 @@ async def resolve_label(ctx, creds, board_id: str, reference: str) -> dict:
     if not ref:
         return tc.fail(tc.TRELLO_VALIDATION_FAILED, "No label was named.")
 
-    import trello_objects as to
     if to.looks_like_id(ref):
         return {"ok": True, "id": ref, "name": "", "resolved_by": "id"}
 
