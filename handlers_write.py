@@ -2221,6 +2221,28 @@ async def set_vote(ctx, params: VoteParams) -> ActionResult:
             params={"value": member["id"]})
         action, word = "created", "Cast"
     if not out.get("ok"):
+        # Trello answers a vote on a board with voting switched OFF with a 401,
+        # the same status it uses for a bad token. Passing that through blamed
+        # the credentials and sent the user to regenerate a token that was
+        # working perfectly -- verified live: a sticker wrote fine seconds
+        # earlier with the same pair. Voting is a BOARD PREFERENCE
+        # (prefs.voting = disabled|enabled), so the pref is read before the
+        # refusal is reported and the real cause named.
+        if out.get("code") in (tc.TRELLO_SCOPE_INSUFFICIENT,
+                               tc.TRELLO_TOKEN_REJECTED):
+            prefs = await tc.request(
+                ctx, "GET", f"boards/{board['id']}", creds,
+                params={"fields": "prefs"})
+            if prefs.get("ok"):
+                voting = str((((prefs.get("data") or {}).get("prefs") or {})
+                              ).get("voting") or "").lower()
+                if voting and voting != "enabled":
+                    return _error(
+                        "Voting is switched off on this board, so Trello "
+                        "refuses the vote. Enable the Voting Power-Up on "
+                        f"'{board.get('name', '')}' and try again -- the "
+                        "credentials are fine.",
+                        tc.TRELLO_VALIDATION_FAILED)
         return _from_envelope(out)
 
     return ActionResult.success(

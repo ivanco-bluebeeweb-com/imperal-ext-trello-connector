@@ -970,3 +970,45 @@ async def test_moving_a_list_to_another_board_names_the_target(
         board="Client Work", list_name="Today", to_board="Archive board"))
     assert succeeded(result) is True
     assert "idBoard" in (http.last_path() + str(http.last_params()))
+
+
+async def test_vote_on_a_board_with_voting_off_blames_the_board(
+        connected_ctx, http):
+    """Trello uses 401 for "voting disabled" as well as "bad token".
+
+    Found live: the vote came back as "your token lacks write scope" while a
+    sticker had written successfully with the SAME token seconds earlier. Passing
+    the 401 through sends the user to regenerate credentials that are fine. The
+    board's own preference is the real answer.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push(member_payload())
+    http.push("unauthorized card permission requested", status=401)
+    http.push(board_payload(prefs={"voting": "disabled"}))
+    result = await hw.set_vote(connected_ctx, VoteParams(card="Fix hero"))
+    assert succeeded(result) is False
+    text = text_of_result(result).lower()
+    assert "voting" in text
+    # The credentials are explicitly exonerated, and no re-auth is suggested.
+    assert "credentials are fine" in text
+    assert "scope" not in text
+
+
+async def test_vote_401_without_a_disabled_pref_stays_an_auth_failure(
+        connected_ctx, http):
+    """The override must not swallow a genuine permission problem.
+
+    If voting IS enabled and Trello still says 401, the token really is the
+    problem and the original advice is the right advice.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push(member_payload())
+    http.push("unauthorized card permission requested", status=401)
+    http.push(board_payload(prefs={"voting": "enabled"}))
+    result = await hw.set_vote(connected_ctx, VoteParams(card="Fix hero"))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_SCOPE_INSUFFICIENT"
