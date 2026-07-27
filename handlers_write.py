@@ -41,27 +41,39 @@ from models import (
     CheckItemParams,
     ConnectAccountParams,
     ConnectResult,
+    CopyBoardParams,
     CopyCardParams,
     CreateBoardParams,
     CreateCardParams,
     CreateChecklistParams,
+    CreateCustomFieldParams,
     CreateLabelParams,
     CreateListParams,
+    CreateWorkspaceParams,
+    CustomFieldOptionParams,
     DeleteAttachmentParams,
     DeleteBoardParams,
     DeleteCardParams,
     DeleteCheckItemParams,
     DeleteChecklistParams,
     DeleteCommentParams,
+    DeleteCustomFieldParams,
     DeleteLabelParams,
+    DeleteWorkspaceParams,
     EditCommentParams,
     ListBulkParams,
     MoveCardParams,
+    MoveListParams,
+    SetCustomFieldParams,
+    StickerParams,
     UpdateBoardParams,
     UpdateCardParams,
     UpdateChecklistParams,
     UpdateLabelParams,
     UpdateListParams,
+    UpdateWorkspaceParams,
+    VoteParams,
+    WorkspaceMemberParams,
     WriteResult,
 )
 
@@ -1822,3 +1834,718 @@ async def copy_card(ctx, params: CopyCardParams) -> ActionResult:
             url=str(made.get("shortUrl") or made.get("url") or ""),
         ),
         f"Copied '{card.get('name', 'card')}' to '{to.name_of(made)}'{where}.")
+
+
+# --------------------------- custom fields ---------------------------
+# THE WRITE SHAPE IS DECIDED BY THE FIELD TYPE, per Trello's custom fields
+# guide: a scalar goes in as {"value": {"text"|"number"|"date"|"checked": "..."}}
+# with every value a STRING, while a dropdown takes {"idValue": "<option id>"}
+# and no `value` key at all. `shared.custom_field_body` owns that mapping so the
+# user passes one `value` and never has to know which JSON key Trello wants.
+
+@chat.function(
+    "create_custom_field",
+    "Add a custom field to a Trello board -- text, number, date, checkbox or a "
+    "dropdown.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.create_custom_field",
+    effects=["trello.custom_field.created"],
+)
+async def create_custom_field(ctx, params: CreateCustomFieldParams) -> ActionResult:
+    """Create a custom field definition on a board.
+
+    A dropdown without options is refused: Trello accepts it, and the result is
+    a field nobody can set a value on -- which looks like a broken field rather
+    than an incomplete request.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    kind = (params.field_type or "text").strip().lower()
+    aliases = {"checkbox": "checkbox", "check": "checkbox", "bool": "checkbox",
+               "dropdown": "list", "select": "list", "list": "list",
+               "text": "text", "string": "text",
+               "number": "number", "num": "number",
+               "date": "date"}
+    resolved = aliases.get(kind)
+    if not resolved:
+        return _error(
+            f"'{params.field_type}' is not a Trello custom field type. Use one "
+            "of: text, number, date, checkbox, list (dropdown).",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    options = _split_names(params.options)
+    if resolved == "list" and not options:
+        return _error(
+            "A dropdown field needs its choices: pass options as a "
+            "comma-separated list. Trello would accept the field without them, "
+            "but no value could ever be set on it.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    body: dict = {
+        "idModel": board["id"],
+        "modelType": "board",
+        "name": params.name,
+        "type": resolved,
+        "display_cardFront": "true" if params.show_on_card else "false",
+    }
+    if resolved == "list":
+        # Options ride along at creation as pos/value pairs.
+        body["options"] = [
+            {"value": {"text": opt}, "pos": (i + 1) * 1024}
+            for i, opt in enumerate(options)
+        ]
+
+    out = await tc.request(ctx, "POST", "customFields", creds, data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    detail = f"{resolved} field on '{board.get('name', '')}'"
+    if options:
+        detail += f" with {len(options)} option(s)"
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=to.name_of(made) or params.name,
+            action="created",
+            detail=detail,
+        ),
+        f"Created custom field '{params.name}' ({resolved}).")
+
+
+@chat.function(
+    "set_custom_field",
+    "Set or clear the value of a custom field on a Trello card.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.set_custom_field",
+    effects=["trello.custom_field.updated"],
+)
+async def set_custom_field(ctx, params: SetCustomFieldParams) -> ActionResult:
+    """Set one custom field value on one card, or clear it.
+
+    CLEARING IS AN EMPTY PUT, not a DELETE -- Trello has no delete route for a
+    card's field value, and sending one 404s in a way that reads like the card
+    is missing.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    field = await shared.resolve_custom_field(
+        ctx, creds, board["id"], params.field)
+    if not field.get("ok"):
+        return _from_envelope(field)
+
+    path = f"cards/{card['id']}/customField/{field['id']}/item"
+
+    if params.clear:
+        # An empty value object is how Trello removes a value.
+        out = await tc.request(ctx, "PUT", path, creds, data={"value": {}})
+        if not out.get("ok"):
+            return _from_envelope(out)
+        return ActionResult.success(
+            WriteResult(
+                id=field["id"],
+                name=field.get("name", ""),
+                action="cleared",
+                detail=f"on '{card.get('name', 'card')}'",
+            ),
+            f"Cleared '{field.get('name', '')}' on "
+            f"'{card.get('name', 'card')}'.")
+
+    if not (params.value or "").strip():
+        return _error(
+            "No value given. Pass a value, or clear=true to empty the field.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    body = shared.custom_field_body(
+        field.get("field_type", ""), params.value, field.get("options_raw") or [])
+    # An EMPTY body means a dropdown value matched none of its options. Sending
+    # it would be a 200 that changed nothing -- reported as "set" to whoever
+    # asked. `body.get("ok", True)` did not catch this: {} has no "ok" key, so
+    # the default said True and the empty write went out.
+    if not body:
+        available = ", ".join(o for o in (field.get("options") or []) if o) or "-"
+        return _error(
+            f"'{params.value}' is not one of the choices on "
+            f"'{field.get('name', '')}'. Available: {available}.",
+            tc.TRELLO_TARGET_NOT_FOUND)
+
+    out = await tc.request(ctx, "PUT", path, creds, data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=field["id"],
+            name=field.get("name", ""),
+            action="updated",
+            detail=f"set to '{params.value}' on '{card.get('name', 'card')}'",
+        ),
+        f"Set '{field.get('name', '')}' to '{params.value}' on "
+        f"'{card.get('name', 'card')}'.")
+
+
+@chat.function(
+    "set_custom_field_option",
+    "Add or remove a choice on a Trello dropdown custom field.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.set_custom_field_option",
+    effects=["trello.custom_field.updated"],
+)
+async def set_custom_field_option(ctx, params: CustomFieldOptionParams) -> ActionResult:
+    """Add a dropdown choice, or remove one."""
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    field = await shared.resolve_custom_field(
+        ctx, creds, board["id"], params.field)
+    if not field.get("ok"):
+        return _from_envelope(field)
+
+    if field.get("field_type") != "list":
+        return _error(
+            f"'{field.get('name', '')}' is a {field.get('field_type') or 'plain'} "
+            "field, not a dropdown -- only dropdown fields have options.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    wanted = (params.option or "").strip()
+    if not wanted:
+        return _error("Name the option.", tc.TRELLO_VALIDATION_FAILED)
+
+    if params.remove:
+        match_id = ""
+        for opt in field.get("options_raw") or []:
+            text = str(((opt or {}).get("value") or {}).get("text") or "")
+            if text.strip().lower() == wanted.lower():
+                match_id = to.id_of(opt)
+                break
+        if not match_id:
+            available = ", ".join(field.get("options") or []) or "-"
+            return _error(
+                f"'{wanted}' is not an option on '{field.get('name', '')}'. "
+                f"Available: {available}.",
+                tc.TRELLO_TARGET_NOT_FOUND)
+        out = await tc.request(
+            ctx, "DELETE", f"customFields/{field['id']}/options/{match_id}",
+            creds)
+        if not out.get("ok"):
+            return _from_envelope(out)
+        return ActionResult.success(
+            WriteResult(
+                id=match_id,
+                name=wanted,
+                action="deleted",
+                detail=f"option removed from '{field.get('name', '')}' -- and "
+                       "from every card that had it selected",
+            ),
+            f"Removed option '{wanted}' from '{field.get('name', '')}'.")
+
+    out = await tc.request(
+        ctx, "POST", f"customFields/{field['id']}/options", creds,
+        data={"value": {"text": wanted}})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=wanted,
+            action="created",
+            detail=f"option added to '{field.get('name', '')}'",
+        ),
+        f"Added option '{wanted}' to '{field.get('name', '')}'.")
+
+
+@chat.function(
+    "delete_custom_field",
+    "Delete a custom field from a Trello board, with its value on every card.",
+    action_type="destructive", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_custom_field",
+    effects=["trello.custom_field.deleted"],
+)
+async def delete_custom_field(ctx, params: DeleteCustomFieldParams) -> ActionResult:
+    """Delete a custom field definition. Gated, because the values go too."""
+    if not params.confirm:
+        return _error(
+            "Deleting a custom field also deletes its value on every card on "
+            "the board, and Trello offers no undo. Pass confirm=true if that is "
+            "really the intent.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    field = await shared.resolve_custom_field(
+        ctx, creds, board["id"], params.field)
+    if not field.get("ok"):
+        return _from_envelope(field)
+
+    out = await tc.request(ctx, "DELETE", f"customFields/{field['id']}", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=field["id"],
+            name=field.get("name", ""),
+            action="deleted",
+            detail="removed from the board with its value on every card",
+        ),
+        f"Deleted custom field '{field.get('name', '')}' -- its value is gone "
+        "from every card that had one.")
+
+
+# --------------------------- stickers and votes ---------------------------
+
+@chat.function(
+    "set_sticker",
+    "Put a sticker on a Trello card, or take one off.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.set_sticker",
+    effects=["trello.sticker.updated"],
+)
+async def set_sticker(ctx, params: StickerParams) -> ActionResult:
+    """Add or remove a sticker.
+
+    Trello's free stickers are named images (`taco-cool`, `thumbsup`, ...). An
+    unknown name is rejected by Trello itself rather than pre-validated here:
+    the set differs per account -- paid boards carry custom stickers -- so a
+    hardcoded allow-list would refuse stickers the user actually has.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    wanted = (params.sticker or "").strip()
+    if not wanted:
+        return _error("Name the sticker.", tc.TRELLO_VALIDATION_FAILED)
+
+    if params.remove:
+        listing = await tc.request(
+            ctx, "GET", f"cards/{card['id']}/stickers", creds)
+        if not listing.get("ok"):
+            return _from_envelope(listing)
+        rows = [r for r in (listing.get("data") or []) if isinstance(r, dict)]
+        match_id = ""
+        for row in rows:
+            if str(row.get("image") or "").strip().lower() == wanted.lower():
+                match_id = to.id_of(row)
+                break
+        if not match_id:
+            present = ", ".join(str(r.get("image") or "") for r in rows) or "-"
+            return _error(
+                f"No '{wanted}' sticker on this card. Present: {present}.",
+                tc.TRELLO_TARGET_NOT_FOUND)
+        out = await tc.request(
+            ctx, "DELETE", f"cards/{card['id']}/stickers/{match_id}", creds)
+        if not out.get("ok"):
+            return _from_envelope(out)
+        return ActionResult.success(
+            WriteResult(id=match_id, name=wanted, action="deleted",
+                        detail=f"sticker removed from '{card.get('name', 'card')}'"),
+            f"Removed the '{wanted}' sticker.")
+
+    out = await tc.request(
+        ctx, "POST", f"cards/{card['id']}/stickers", creds,
+        params={"image": wanted, "top": 0, "left": 0, "zIndex": 1})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(id=to.id_of(made), name=wanted, action="created",
+                    detail=f"sticker added to '{card.get('name', 'card')}'"),
+        f"Put the '{wanted}' sticker on '{card.get('name', 'card')}'.")
+
+
+@chat.function(
+    "set_vote",
+    "Vote on a Trello card, or take a vote back.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.set_vote",
+    effects=["trello.vote.updated"],
+)
+async def set_vote(ctx, params: VoteParams) -> ActionResult:
+    """Cast or withdraw a vote.
+
+    Voting needs the Voting Power-Up enabled on the board; without it Trello
+    refuses the write, and that refusal is passed through rather than dressed up
+    as success.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await _resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    who = (params.member or "me").strip() or "me"
+    member = await shared.resolve_member(ctx, creds, board["id"], who)
+    if not member.get("ok"):
+        return _from_envelope(member)
+
+    if params.remove:
+        out = await tc.request(
+            ctx, "DELETE",
+            f"cards/{card['id']}/membersVoted/{member['id']}", creds)
+        action, word = "deleted", "Withdrew"
+    else:
+        out = await tc.request(
+            ctx, "POST", f"cards/{card['id']}/membersVoted", creds,
+            params={"value": member["id"]})
+        action, word = "created", "Cast"
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=card["id"],
+            name=card.get("name", ""),
+            action=action,
+            detail=f"vote by {member.get('name', 'member')}",
+        ),
+        f"{word} {member.get('name', 'member')}'s vote on "
+        f"'{card.get('name', 'card')}'.")
+
+
+# --------------------------- workspaces ---------------------------
+# Trello calls these ORGANIZATIONS in the API and WORKSPACES in the interface.
+# The tools use the interface word, since that is what the user sees, and the
+# routes use the API word underneath.
+
+@chat.function(
+    "create_workspace",
+    "Create a Trello workspace.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.create_workspace",
+    effects=["trello.workspace.created"],
+)
+async def create_workspace(ctx, params: CreateWorkspaceParams) -> ActionResult:
+    """Create a workspace (an organization, in API terms)."""
+    creds, _board, err = await _resolve(ctx, "")
+    if err and not creds:
+        return err
+
+    body = {"displayName": params.name}
+    if (params.desc or "").strip():
+        body["desc"] = params.desc.strip()
+    if (params.website or "").strip():
+        body["website"] = params.website.strip()
+
+    out = await tc.request(ctx, "POST", "organizations", creds, data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=str(made.get("displayName") or params.name),
+            action="created",
+            detail="workspace created",
+            url=str(made.get("url") or ""),
+        ),
+        f"Created workspace '{params.name}'.")
+
+
+@chat.function(
+    "update_workspace",
+    "Rename a Trello workspace or change its description or website.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.update_workspace",
+    effects=["trello.workspace.updated"],
+)
+async def update_workspace(ctx, params: UpdateWorkspaceParams) -> ActionResult:
+    """Change a workspace's name, description or website.
+
+    THE EMPTY-CHANGE GUARD RUNS FIRST, before credentials are even looked up. A
+    no-op does not depend on being connected, and checking connection first
+    reported "no credentials" for a request that was malformed anyway -- the
+    user would go fix the wrong thing.
+    """
+    body: dict = {}
+    changed: list[str] = []
+    if (params.name or "").strip():
+        body["displayName"] = params.name.strip()
+        changed.append("name")
+    if (params.desc or "").strip():
+        body["desc"] = params.desc.strip()
+        changed.append("description")
+    if (params.website or "").strip():
+        body["website"] = params.website.strip()
+        changed.append("website")
+
+    if not body:
+        return _error("Nothing to change: give a new name, description or "
+                      "website.", tc.TRELLO_VALIDATION_FAILED)
+
+    creds, _board, err = await _resolve(ctx, "")
+    if err and not creds:
+        return err
+
+    target = await shared.resolve_workspace(ctx, creds, params.workspace)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    out = await tc.request(
+        ctx, "PUT", f"organizations/{target['id']}", creds, data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"],
+            name=params.name.strip() or target.get("name", ""),
+            action="updated",
+            detail=f"changed: {', '.join(changed)}",
+        ),
+        f"Updated workspace '{target.get('name', '')}'.")
+
+
+@chat.function(
+    "set_workspace_member",
+    "Add someone to a Trello workspace, change their role, or remove them.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.set_workspace_member",
+    effects=["trello.workspace.updated"],
+)
+async def set_workspace_member(ctx, params: WorkspaceMemberParams) -> ActionResult:
+    """Add, promote or remove a workspace member.
+
+    Removing from the WORKSPACE does not remove someone from its boards -- Trello
+    keeps board membership separate -- so the result says so, because "removed"
+    otherwise implies an access revocation that has not happened.
+    """
+    creds, _board, err = await _resolve(ctx, "")
+    if err and not creds:
+        return err
+
+    target = await shared.resolve_workspace(ctx, creds, params.workspace)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    who = (params.member or "").strip()
+    if not who:
+        return _error("Name the person.", tc.TRELLO_VALIDATION_FAILED)
+
+    if params.remove:
+        listing = await tc.request(
+            ctx, "GET", f"organizations/{target['id']}/members", creds,
+            params={"fields": "fullName,username"})
+        if not listing.get("ok"):
+            return _from_envelope(listing)
+        rows = [r for r in (listing.get("data") or []) if isinstance(r, dict)]
+        match_id = ""
+        lowered = who.lower()
+        for row in rows:
+            if lowered in (str(row.get("fullName") or "").lower(),
+                           str(row.get("username") or "").lower()):
+                match_id = to.id_of(row)
+                break
+        if not match_id and to.looks_like_id(who):
+            match_id = who
+        if not match_id:
+            names = ", ".join(str(r.get("fullName") or r.get("username") or "")
+                              for r in rows) or "-"
+            return _error(
+                f"'{who}' is not in this workspace. Members: {names}.",
+                tc.TRELLO_TARGET_NOT_FOUND)
+        out = await tc.request(
+            ctx, "DELETE", f"organizations/{target['id']}/members/{match_id}",
+            creds)
+        if not out.get("ok"):
+            return _from_envelope(out)
+        return ActionResult.success(
+            WriteResult(
+                id=match_id, name=who, action="deleted",
+                detail="removed from the workspace; board access is separate "
+                       "and is unchanged",
+            ),
+            f"Removed {who} from '{target.get('name', '')}'. Their access to "
+            "individual boards is separate and unchanged.")
+
+    role = (params.role or "normal").strip().lower()
+    if role not in ("normal", "admin"):
+        return _error("A workspace role is 'normal' or 'admin'.",
+                      tc.TRELLO_VALIDATION_FAILED)
+
+    body = {"type": role}
+    if "@" in who:
+        body["email"] = who
+    else:
+        body["fullName"] = who
+
+    out = await tc.request(
+        ctx, "PUT", f"organizations/{target['id']}/members", creds, data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(id=target["id"], name=who, action="updated",
+                    detail=f"invited to '{target.get('name', '')}' as {role}"),
+        f"Added {who} to '{target.get('name', '')}' as {role}.")
+
+
+@chat.function(
+    "delete_workspace",
+    "Permanently delete a Trello workspace.",
+    action_type="destructive", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.delete_workspace",
+    effects=["trello.workspace.deleted"],
+)
+async def delete_workspace(ctx, params: DeleteWorkspaceParams) -> ActionResult:
+    """Delete a workspace. Gated: its boards outlive it, but it does not."""
+    if not params.confirm:
+        return _error(
+            "Deleting a workspace cannot be undone. Its boards are not deleted "
+            "-- they become personal boards of their owners -- but the "
+            "workspace, its members list and its settings are gone. Pass "
+            "confirm=true if that is really the intent.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    creds, _board, err = await _resolve(ctx, "")
+    if err and not creds:
+        return err
+
+    target = await shared.resolve_workspace(ctx, creds, params.workspace)
+    if not target.get("ok"):
+        return _from_envelope(target)
+
+    out = await tc.request(
+        ctx, "DELETE", f"organizations/{target['id']}", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=target["id"], name=target.get("name", ""), action="deleted",
+            detail="workspace deleted; its boards became personal boards",
+        ),
+        f"Deleted workspace '{target.get('name', '')}'. Its boards were not "
+        "deleted -- they are now personal boards.")
+
+
+# --------------------------- board copy, list move ---------------------------
+
+@chat.function(
+    "copy_board",
+    "Copy a Trello board, with or without its cards.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.copy_board",
+    effects=["trello.board.created"],
+)
+async def copy_board(ctx, params: CopyBoardParams) -> ActionResult:
+    """Copy a board.
+
+    `keep_cards=false` copies the STRUCTURE only -- lists, labels and custom
+    fields without the cards, which is how a board becomes a template.
+    """
+    picked = await acct.resolve_board(ctx, params.board)
+    if not picked.get("ok"):
+        return _from_envelope(picked)
+    source = picked.get("board", {})
+    creds = (picked.get("key", ""), picked.get("token", ""))
+
+    body = {
+        "name": params.name,
+        "idBoardSource": source["id"],
+        # Trello's own vocabulary: "cards" copies them, "none" leaves them out.
+        "keepFromSource": "cards" if params.keep_cards else "none",
+    }
+    if (params.workspace or "").strip():
+        target = await shared.resolve_workspace(ctx, creds, params.workspace)
+        if not target.get("ok"):
+            return _from_envelope(target)
+        body["idOrganization"] = target["id"]
+
+    out = await tc.request(ctx, "POST", "boards", creds, data=body)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    made = out.get("data") or {}
+    what = "with its cards" if params.keep_cards else "structure only, no cards"
+    return ActionResult.success(
+        WriteResult(
+            id=to.id_of(made),
+            name=to.name_of(made) or params.name,
+            action="created",
+            detail=f"copied from '{source.get('name', '')}' ({what})",
+            url=str(made.get("url") or ""),
+        ),
+        f"Copied '{source.get('name', '')}' to '{params.name}' ({what}).")
+
+
+@chat.function(
+    "move_list_to_board",
+    "Move a whole Trello list (column), with its cards, to another board.",
+    action_type="write", chain_callable=True,
+    data_model=WriteResult,
+    event="trello-connector.move_list_to_board",
+    effects=["trello.list.updated"],
+)
+async def move_list_to_board(ctx, params: MoveListParams) -> ActionResult:
+    """Move a list and everything on it to a different board.
+
+    Distinct from `move_all_cards`, which sends the cards and leaves the column
+    behind. This moves the column itself.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    source = await _resolve_list(ctx, creds, board["id"], params.list_name)
+    if not source.get("ok"):
+        return _from_envelope(source)
+
+    found = await acct.resolve_board(ctx, params.to_board)
+    if not found.get("ok"):
+        return _from_envelope(found)
+    destination = found.get("board", {})
+
+    if destination.get("id") == board["id"]:
+        return _error(
+            f"'{destination.get('name', '')}' is the board the list is already "
+            "on. To reorder it there, use update_list with a position.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    out = await tc.request(
+        ctx, "PUT", f"lists/{source['id']}/idBoard", creds,
+        params={"value": destination["id"]})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    return ActionResult.success(
+        WriteResult(
+            id=source["id"],
+            name=source.get("name", ""),
+            action="moved",
+            detail=f"to board '{destination.get('name', '')}' with its cards",
+        ),
+        f"Moved '{source.get('name', '')}' to "
+        f"'{destination.get('name', '')}'.")

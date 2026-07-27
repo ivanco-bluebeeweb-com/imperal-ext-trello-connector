@@ -387,6 +387,148 @@ class CopyCardParams(BoardScoped):
                            "comments, due, labels, members, stickers")
 
 
+# --- custom fields ---
+# The VALUE SHAPE DEPENDS ON THE FIELD TYPE, verified against Trello's custom
+# fields guide: {"value": {"text"|"number"|"date"|"checked": "..."}} for the
+# scalar types, and {"idValue": "<option id>"} for a dropdown. Every one is sent
+# as a STRING, including number and checked. One `value` parameter is offered
+# here and coerced to the right shape from the field's own declared type, because
+# asking the user which JSON key Trello wants is asking them to know the API.
+
+class ListCustomFieldsParams(BoardScoped):
+    card: str = Field(
+        "", description="Also show this card's current values (name or id). "
+                        "Omit to list just the field definitions.")
+
+
+class CreateCustomFieldParams(BoardScoped):
+    name: str = Field(..., description="Field name shown on the card, e.g. 'Priority'")
+    field_type: str = Field(
+        "text", description="One of: text, number, date, checkbox, list "
+                            "(list = a dropdown, which needs options)")
+    options: str = Field(
+        "", description="Comma-separated dropdown choices, for a 'list' field")
+    show_on_card: bool = Field(
+        True, description="Show the field on the front of the card")
+
+
+class DeleteCustomFieldParams(BoardScoped):
+    field: str = Field(..., description="Custom field to delete (name or id)")
+    confirm: bool = Field(
+        False, description="Must be true. Deleting the field also deletes its "
+                           "value on EVERY card on the board, with no undo.")
+
+
+class SetCustomFieldParams(BoardScoped):
+    card: str = Field(..., description="Card to set the value on (name or id)")
+    field: str = Field(..., description="Custom field (name or id)")
+    value: str = Field(
+        "", description="The value. For a dropdown, the option's text. For a "
+                        "checkbox, 'true' or 'false'. For a date, "
+                        "'YYYY-MM-DD'. Leave empty with clear=true to erase.")
+    clear: bool = Field(
+        False, description="Erase the value on this card instead of setting one")
+
+
+class CustomFieldOptionParams(BoardScoped):
+    field: str = Field(..., description="Dropdown custom field (name or id)")
+    option: str = Field(..., description="Option text to add or remove")
+    remove: bool = Field(
+        False, description="Set true to REMOVE this option instead of adding it")
+
+
+# --- stickers and votes ---
+
+class StickerParams(BoardScoped):
+    card: str = Field(..., description="Card to put the sticker on (name or id)")
+    sticker: str = Field(
+        ..., description="Sticker name, e.g. 'thumbsup', 'star', 'heart', "
+                         "'check', 'clock', 'rocketship'")
+    remove: bool = Field(
+        False, description="Set true to REMOVE this sticker from the card")
+
+
+class VoteParams(BoardScoped):
+    card: str = Field(..., description="Card to vote on (name or id)")
+    member: str = Field(
+        "me", description="Who votes -- defaults to the connected account")
+    remove: bool = Field(
+        False, description="Set true to take the vote back")
+
+
+# --- workspaces (organizations) ---
+# Trello calls them ORGANIZATIONS in the API and WORKSPACES in the UI. The tools
+# use the word the user sees; the routes use the word Trello's API uses.
+
+class ListWorkspacesParams(BaseModel):
+    refresh: bool = Field(
+        False, description="Re-read from Trello instead of the cache")
+
+
+class CreateWorkspaceParams(BaseModel):
+    name: str = Field(..., description="Workspace name, e.g. 'Acme Studio'")
+    desc: str = Field("", description="What the workspace is for")
+    website: str = Field("", description="Workspace website URL")
+
+
+class UpdateWorkspaceParams(BaseModel):
+    workspace: str = Field(..., description="Workspace to change (name or id)")
+    name: str = Field("", description="New name")
+    desc: str = Field("", description="New description")
+    website: str = Field("", description="New website URL")
+
+
+class DeleteWorkspaceParams(BaseModel):
+    workspace: str = Field(..., description="Workspace to delete (name or id)")
+    confirm: bool = Field(
+        False, description="Must be true. Deleting a workspace is permanent.")
+
+
+class WorkspaceMemberParams(BaseModel):
+    workspace: str = Field(..., description="Workspace to change (name or id)")
+    member: str = Field(
+        ..., description="Person to add or remove: email, username or full name")
+    role: str = Field("normal", description="'normal' or 'admin'")
+    remove: bool = Field(
+        False, description="Set true to REMOVE them from the workspace")
+
+
+# --- board copy, list move, activity ---
+
+class CopyBoardParams(BaseModel):
+    # Named `board` like every other tool in this connector. It was `source`,
+    # which read fine in isolation and wrongly everywhere else: one tool asking
+    # for `source` while forty-four ask for `board` is a trap for the caller.
+    board: str = Field(..., description="Board to copy (name or id)")
+    name: str = Field(..., description="Name for the new board")
+    workspace: str = Field(
+        "", description="Workspace to create the copy in (name or id)")
+    keep_cards: bool = Field(
+        True, description="Copy the cards too. False copies only the columns.")
+
+
+class MoveListParams(BoardScoped):
+    list_name: str = Field(..., description="List (column) to move (name or id)")
+    to_board: str = Field(..., description="Destination board (name or id)")
+
+
+class ListActivityParams(BoardScoped):
+    card: str = Field(
+        "", description="Only this card's activity (name or id). Omit for the "
+                        "whole board.")
+    limit: int = Field(
+        20, ge=1, le=100, description="How many recent entries to return")
+
+
+class ListNotificationsParams(BaseModel):
+    unread_only: bool = Field(
+        True, description="Only unread notifications")
+    limit: int = Field(
+        20, ge=1, le=100, description="How many to return")
+    mark_read: bool = Field(
+        False, description="Mark ALL notifications read instead of listing them")
+
+
 # --------------------------- display base ---------------------------
 
 class _Displayable(sdl.Entity):
@@ -560,6 +702,71 @@ class TrelloAttachment(_Displayable):
 
 
 class TrelloAttachmentList(sdl.EntityList[TrelloAttachment]):
+    pass
+
+
+class TrelloCustomField(_Displayable):
+    """One custom field definition, plus this card's value when asked for one.
+
+    `field_type` is carried because it DECIDES the write shape: a number goes in
+    as {"number": "42"}, a dropdown as an option id. A caller that cannot see the
+    type cannot set the value correctly.
+    """
+    name: str = ""
+    field_type: str = ""
+    options: list[str] = []
+    value: str = ""
+    shown_on_card: bool = False
+
+
+class TrelloCustomFieldList(sdl.EntityList[TrelloCustomField]):
+    pass
+
+
+class TrelloSticker(_Displayable):
+    name: str = ""
+    image: str = ""
+
+
+class TrelloStickerList(sdl.EntityList[TrelloSticker]):
+    pass
+
+
+class TrelloWorkspace(_Displayable):
+    """A Trello workspace -- `organization` in the API, workspace in the UI."""
+    name: str = ""
+    display_name: str = ""
+    desc: str = ""
+    website: str = ""
+    board_count: int = 0
+    member_count: int = 0
+
+
+class TrelloWorkspaceList(sdl.EntityList[TrelloWorkspace]):
+    pass
+
+
+class TrelloActivity(_Displayable):
+    """One entry from a board's or card's action history."""
+    action: str = ""
+    member: str = ""
+    created: str = ""
+    summary: str = ""
+
+
+class TrelloActivityList(sdl.EntityList[TrelloActivity]):
+    pass
+
+
+class TrelloNotification(_Displayable):
+    kind: str = ""
+    member: str = ""
+    created: str = ""
+    unread: bool = False
+    summary: str = ""
+
+
+class TrelloNotificationList(sdl.EntityList[TrelloNotification]):
     pass
 
 

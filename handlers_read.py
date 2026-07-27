@@ -33,12 +33,16 @@ from models import (
     ListAccountsParams,
     ListBoardsParams,
     ListCardsParams,
+    ListActivityParams,
     ListAttachmentsParams,
     ListChecklistsParams,
+    ListCustomFieldsParams,
+    ListNotificationsParams,
     ListCommentsParams,
     ListLabelsParams,
     ListListsParams,
     ListMembersParams,
+    ListWorkspacesParams,
     SearchParams,
     TrelloAccount,
     TrelloAccountList,
@@ -48,8 +52,18 @@ from models import (
     TrelloCardList,
     TrelloAttachment,
     TrelloAttachmentList,
+    TrelloActivity,
+    TrelloActivityList,
     TrelloChecklist,
     TrelloChecklistList,
+    TrelloCustomField,
+    TrelloCustomFieldList,
+    TrelloNotification,
+    TrelloNotificationList,
+    TrelloSticker,
+    TrelloStickerList,
+    TrelloWorkspace,
+    TrelloWorkspaceList,
     TokenLink,
     TrelloComment,
     TrelloCommentList,
@@ -756,3 +770,274 @@ async def list_attachments(ctx, params: ListAttachmentsParams) -> ActionResult:
         note += f"; {uploads} stored by Trello, the rest are links"
     return ActionResult.success(
         TrelloAttachmentList(items=items, total=len(items)), note + ".")
+
+
+@chat.function(
+    "list_custom_fields",
+    "List the custom fields on a Trello board, optionally with one card's values.",
+    action_type="read", chain_callable=True,
+    data_model=TrelloCustomField,
+)
+async def list_custom_fields(ctx, params: ListCustomFieldsParams) -> ActionResult:
+    """List custom field definitions, and one card's values when asked.
+
+    An empty result is reported as AMBIGUOUS on purpose: Trello returns an empty
+    array both when a board has no custom fields and when the Custom Fields
+    Power-Up is switched off, and those need different actions from the user.
+    """
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    out = await shared.board_custom_fields(ctx, creds, board["id"])
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+    if not rows:
+        return ActionResult.success(
+            TrelloCustomFieldList(items=[], total=0),
+            f"No custom fields on '{board.get('name', '')}'. Trello also "
+            "returns an empty list when the Custom Fields Power-Up is off, so "
+            "check that it is enabled on the board.")
+
+    # One card's values, when a card was named: the values live on the CARD, not
+    # on the field definition, so this is a second call by necessity.
+    values: dict[str, str] = {}
+    card_name = ""
+    if (params.card or "").strip():
+        card = await shared.resolve_card(ctx, creds, board["id"], params.card)
+        if not card.get("ok"):
+            return _from_envelope(card)
+        card_name = card.get("name", "")
+        got = await tc.request(
+            ctx, "GET", f"cards/{card['id']}/customFieldItems", creds)
+        if got.get("ok"):
+            option_text: dict[str, str] = {}
+            for row in rows:
+                for opt in row.get("options") or []:
+                    if isinstance(opt, dict):
+                        option_text[to.id_of(opt)] = str(
+                            ((opt.get("value") or {}) or {}).get("text") or "")
+            for item in got.get("data") or []:
+                if not isinstance(item, dict):
+                    continue
+                field_id = str(item.get("idCustomField") or "")
+                if item.get("idValue"):
+                    values[field_id] = option_text.get(
+                        str(item["idValue"]), str(item["idValue"]))
+                else:
+                    holder = item.get("value") or {}
+                    if isinstance(holder, dict):
+                        for key in ("text", "number", "date", "checked"):
+                            if holder.get(key) is not None:
+                                values[field_id] = str(holder[key])
+                                break
+
+    items = []
+    for row in rows:
+        field_id = to.id_of(row)
+        options = [str(((o.get("value") or {}) or {}).get("text") or "")
+                   for o in (row.get("options") or []) if isinstance(o, dict)]
+        display = row.get("display") or {}
+        items.append(TrelloCustomField(
+            id=field_id,
+            title=to.name_of(row),
+            name=to.name_of(row),
+            field_type=str(row.get("type") or ""),
+            options=options,
+            value=values.get(field_id, ""),
+            shown_on_card=bool(display.get("cardFront")),
+        ))
+
+    where = f" on '{card_name}'" if card_name else ""
+    return ActionResult.success(
+        TrelloCustomFieldList(items=items, total=len(items)),
+        f"{len(items)} custom field(s) on '{board.get('name', '')}'{where}.")
+
+
+@chat.function(
+    "list_stickers",
+    "List the stickers on a Trello card.",
+    action_type="read", chain_callable=True,
+    data_model=TrelloSticker,
+)
+async def list_stickers(ctx, params: ListAttachmentsParams) -> ActionResult:
+    """List a card's stickers."""
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    card = await shared.resolve_card(ctx, creds, board["id"], params.card)
+    if not card.get("ok"):
+        return _from_envelope(card)
+
+    out = await tc.request(ctx, "GET", f"cards/{card['id']}/stickers", creds)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+    items = [TrelloSticker(
+        id=to.id_of(r),
+        title=str(r.get("image") or "sticker"),
+        name=str(r.get("image") or ""),
+        image=str(r.get("imageUrl") or ""),
+    ) for r in rows]
+    where = card.get("name") or params.card
+    return ActionResult.success(
+        TrelloStickerList(items=items, total=len(items)),
+        f"{len(items)} sticker(s) on '{where}'." if items
+        else f"No stickers on '{where}'.")
+
+
+@chat.function(
+    "list_workspaces",
+    "List the Trello workspaces the connected accounts belong to.",
+    action_type="read", chain_callable=True,
+    data_model=TrelloWorkspace,
+)
+async def list_workspaces(ctx, params: ListWorkspacesParams) -> ActionResult:
+    """List workspaces (organizations, in API terms)."""
+    creds, _board, err = await _resolve(ctx, "")
+    if err and not creds:
+        return err
+
+    out = await tc.request(
+        ctx, "GET", "members/me/organizations", creds,
+        params={"fields": "displayName,name,desc,website,idBoards"})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+    if not rows:
+        return ActionResult.success(
+            TrelloWorkspaceList(items=[], total=0),
+            "This account is in no Trello workspaces. Personal boards do not "
+            "belong to one.")
+
+    items = [TrelloWorkspace(
+        id=to.id_of(r),
+        title=str(r.get("displayName") or r.get("name") or "(unnamed)"),
+        name=str(r.get("name") or ""),
+        display_name=str(r.get("displayName") or ""),
+        desc=str(r.get("desc") or ""),
+        website=str(r.get("website") or ""),
+        board_count=len(r.get("idBoards") or []),
+    ) for r in rows]
+    return ActionResult.success(
+        TrelloWorkspaceList(items=items, total=len(items)),
+        f"{len(items)} workspace(s).")
+
+
+@chat.function(
+    "list_activity",
+    "Read what happened recently on a Trello board, or on one card.",
+    action_type="read", chain_callable=True,
+    data_model=TrelloActivity,
+)
+async def list_activity(ctx, params: ListActivityParams) -> ActionResult:
+    """Read the action history of a board or a card."""
+    creds, board, err = await _resolve(ctx, params.board)
+    if err:
+        return err
+
+    limit = max(1, min(int(params.limit or 20), 50))
+
+    if (params.card or "").strip():
+        card = await shared.resolve_card(ctx, creds, board["id"], params.card)
+        if not card.get("ok"):
+            return _from_envelope(card)
+        path = f"cards/{card['id']}/actions"
+        where = f"'{card.get('name', 'card')}'"
+    else:
+        path = f"boards/{board['id']}/actions"
+        where = f"'{board.get('name', '')}'"
+
+    out = await tc.request(ctx, "GET", path, creds, params={"limit": limit})
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+    items = []
+    for r in rows:
+        data = r.get("data") or {}
+        creator = r.get("memberCreator") or {}
+        # A one-line summary, since the raw action shape differs per type and
+        # an unreadable blob of JSON is not an activity feed.
+        bits = []
+        for key in ("card", "list", "board", "checklist", "listAfter"):
+            holder = data.get(key)
+            if isinstance(holder, dict) and holder.get("name"):
+                bits.append(str(holder["name"]))
+        if isinstance(data.get("text"), str) and data["text"]:
+            bits.append(f'"{data["text"][:80]}"')
+        items.append(TrelloActivity(
+            id=to.id_of(r),
+            title=str(r.get("type") or "action"),
+            action=str(r.get("type") or ""),
+            member=str(creator.get("fullName") or creator.get("username") or ""),
+            created=str(r.get("date") or ""),
+            summary=" - ".join(bits),
+        ))
+
+    return ActionResult.success(
+        TrelloActivityList(items=items, total=len(items)),
+        f"{len(items)} recent action(s) on {where}.")
+
+
+@chat.function(
+    "list_notifications",
+    "Read your Trello notifications, and optionally mark them read.",
+    action_type="read", chain_callable=True,
+    data_model=TrelloNotification,
+)
+async def list_notifications(ctx, params: ListNotificationsParams) -> ActionResult:
+    """Read notifications for the connected account."""
+    creds, _board, err = await _resolve(ctx, "")
+    if err and not creds:
+        return err
+
+    limit = max(1, min(int(params.limit or 20), 50))
+    query = {"limit": limit}
+    if params.unread_only:
+        query["read_filter"] = "unread"
+
+    out = await tc.request(
+        ctx, "GET", "members/me/notifications", creds, params=query)
+    if not out.get("ok"):
+        return _from_envelope(out)
+
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+    items = []
+    for r in rows:
+        data = r.get("data") or {}
+        creator = r.get("memberCreator") or {}
+        bits = []
+        for key in ("card", "board", "list"):
+            holder = data.get(key)
+            if isinstance(holder, dict) and holder.get("name"):
+                bits.append(str(holder["name"]))
+        if isinstance(data.get("text"), str) and data["text"]:
+            bits.append(f'"{data["text"][:80]}"')
+        items.append(TrelloNotification(
+            id=to.id_of(r),
+            title=str(r.get("type") or "notification"),
+            kind=str(r.get("type") or ""),
+            member=str(creator.get("fullName") or creator.get("username") or ""),
+            created=str(r.get("date") or ""),
+            unread=not bool(r.get("dateRead")),
+            summary=" - ".join(bits),
+        ))
+
+    note = ""
+    if params.mark_read and rows:
+        # Marking read is a WRITE inside a read tool, so it only happens when
+        # asked for explicitly -- and it is reported, never silent.
+        marked = await tc.request(ctx, "POST", "notifications/all/read", creds)
+        note = (" All notifications marked read." if marked.get("ok")
+                else " Could not mark them read.")
+
+    scope = "unread " if params.unread_only else ""
+    return ActionResult.success(
+        TrelloNotificationList(items=items, total=len(items)),
+        f"{len(items)} {scope}notification(s).{note}")

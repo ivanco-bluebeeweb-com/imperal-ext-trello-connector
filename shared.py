@@ -439,3 +439,156 @@ async def resolve_attachment(ctx, creds, card_id: str, reference: str) -> dict:
                 picked["is_upload"] = bool(r.get("isUpload"))
                 break
     return picked
+
+
+async def board_custom_fields(ctx, creds, board_id: str) -> dict:
+    """Read a board's custom field definitions.
+
+    Trello returns an EMPTY ARRAY when the Custom Fields Power-Up is disabled --
+    not an error. So "no fields" and "the feature is off" look identical here,
+    and the callers say so rather than reporting an empty board as a fact.
+    """
+    return await tc.request(
+        ctx, "GET", f"boards/{board_id}/customFields", creds)
+
+
+async def resolve_custom_field(ctx, creds, board_id: str,
+                               reference: str) -> dict:
+    """Resolve a custom field by name, carrying its TYPE and options along.
+
+    The type is not decoration: the write shape depends on it entirely
+    ({"value": {"number": "42"}} vs {"idValue": "<option id>"}), so a resolver
+    that returned only an id would force every caller to fetch the field again.
+    """
+    ref = (reference or "").strip()
+    if not ref:
+        return tc.fail(tc.TRELLO_VALIDATION_FAILED, "No custom field was named.")
+
+    out = await board_custom_fields(ctx, creds, board_id)
+    if not out.get("ok"):
+        return out
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+
+    if not rows:
+        return tc.fail(
+            tc.TRELLO_TARGET_NOT_FOUND,
+            "This board has no custom fields. Trello also returns an empty "
+            "list when the Custom Fields Power-Up is switched off, so check "
+            "that it is enabled on the board.")
+
+    lowered = ref.lower()
+    exact = [r for r in rows if to.name_of(r).strip().lower() == lowered]
+    partial = [r for r in rows if lowered in to.name_of(r).strip().lower()]
+    # An id may be pasted straight in.
+    if to.looks_like_id(ref):
+        exact = [r for r in rows if to.id_of(r) == ref] or exact
+
+    matches = exact or partial
+    if not matches:
+        available = ", ".join(to.name_of(r) for r in rows) or "-"
+        return tc.fail(
+            tc.TRELLO_TARGET_NOT_FOUND,
+            f"No custom field matches '{reference}'. Available: {available}.")
+    if len(matches) > 1:
+        names = ", ".join(to.name_of(r) for r in matches[:6])
+        return tc.fail(
+            tc.TRELLO_TARGET_AMBIGUOUS,
+            f"'{reference}' matches several custom fields: {names}.")
+
+    row = matches[0]
+    raw = [o for o in (row.get("options") or []) if isinstance(o, dict)]
+    # TWO views of the options, deliberately: `options_raw` keeps the dicts so a
+    # caller can map a chosen text back to the option ID Trello wants, while
+    # `options` is the plain texts for anything the user reads. Returning only
+    # one of them forced every call site to re-derive the other.
+    return {
+        "ok": True,
+        "id": to.id_of(row),
+        "name": to.name_of(row),
+        "field_type": str(row.get("type") or ""),
+        "options_raw": raw,
+        "options": [str(((o.get("value") or {}) or {}).get("text") or "")
+                    for o in raw],
+        "resolved_by": "name",
+    }
+
+
+def custom_field_body(field_type: str, value: str,
+                      options: list[dict]) -> dict:
+    """Build the PUT body for one custom field value.
+
+    THE SHAPE IS TYPE-DEPENDENT, and every scalar goes in as a STRING even when
+    it is a number or a boolean -- Trello's guide is explicit about that. A
+    dropdown ("list") does not take a value at all: it takes the ID of one of
+    its own options, which is why the options are passed in here.
+
+    Returns {} when a dropdown value does not match any option, so the caller
+    can refuse instead of silently writing nothing.
+    """
+    kind = (field_type or "").strip().lower()
+    text = (value or "").strip()
+
+    if kind == "list":
+        for opt in options:
+            opt_text = str(((opt.get("value") or {}) or {}).get("text") or "")
+            if opt_text.strip().lower() == text.lower():
+                return {"idValue": to.id_of(opt)}
+        return {}
+
+    if kind == "checkbox":
+        # Anything a human would write for yes/no, normalised to Trello's
+        # "true"/"false" strings.
+        truthy = text.lower() in ("true", "yes", "1", "on", "checked", "да")
+        return {"value": {"checked": "true" if truthy else "false"}}
+
+    if kind == "number":
+        return {"value": {"number": text}}
+
+    if kind == "date":
+        return {"value": {"date": text}}
+
+    # text, and anything Trello adds later that behaves like text.
+    return {"value": {"text": text}}
+
+
+async def resolve_workspace(ctx, creds, reference: str) -> dict:
+    """Resolve a workspace (organization) by name or id.
+
+    Matches on displayName first -- that is what the user sees in the UI -- then
+    on the API's short `name`, which is a slug they may never have seen.
+    """
+    ref = (reference or "").strip()
+    if not ref:
+        return tc.fail(tc.TRELLO_VALIDATION_FAILED, "No workspace was named.")
+
+    out = await tc.request(ctx, "GET", "members/me/organizations", creds,
+                           params={"fields": "name,displayName,desc,website"})
+    if not out.get("ok"):
+        return out
+    rows = [r for r in (out.get("data") or []) if isinstance(r, dict)]
+
+    lowered = ref.lower()
+    matches = [r for r in rows
+               if str(r.get("displayName") or "").strip().lower() == lowered
+               or str(r.get("name") or "").strip().lower() == lowered
+               or to.id_of(r) == ref]
+    if not matches:
+        matches = [r for r in rows
+                   if lowered in str(r.get("displayName") or "").lower()]
+    if not matches:
+        available = ", ".join(
+            str(r.get("displayName") or r.get("name") or "?")
+            for r in rows) or "-"
+        return tc.fail(
+            tc.TRELLO_TARGET_NOT_FOUND,
+            f"No workspace matches '{reference}'. Available: {available}.")
+    if len(matches) > 1:
+        names = ", ".join(str(r.get("displayName") or "?")
+                          for r in matches[:6])
+        return tc.fail(tc.TRELLO_TARGET_AMBIGUOUS,
+                       f"'{reference}' matches several workspaces: {names}.")
+
+    row = matches[0]
+    return {"ok": True, "id": to.id_of(row),
+            "name": str(row.get("displayName") or row.get("name") or ""),
+            "resolved_by": "name"}

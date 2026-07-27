@@ -249,6 +249,47 @@ def label_payload(label_id: str = "d2" + "a" * 22, name: str = "Urgent",
             "idBoard": "6a" + "2" * 22}
 
 
+def custom_field_payload(field_id: str = "f5" + "d" * 22,
+                         name: str = "Priority",
+                         field_type: str = "list",
+                         with_options: bool = True) -> dict:
+    """A custom field definition.
+
+    `type` is the field that decides the write shape, so it is explicit here
+    rather than defaulted into text: a test that sets a dropdown value through a
+    text-shaped body would pass against a fixture that lied about the type.
+    """
+    row = {
+        "id": field_id,
+        "idModel": "6a" + "2" * 22,
+        "modelType": "board",
+        "name": name,
+        "type": field_type,
+        "pos": 16384,
+        "display": {"cardFront": True},
+    }
+    if with_options and field_type == "list":
+        row["options"] = [
+            {"id": "aa" + "1" * 22, "idCustomField": field_id,
+             "value": {"text": "Low"}, "color": "none", "pos": 16384},
+            {"id": "bb" + "2" * 22, "idCustomField": field_id,
+             "value": {"text": "High"}, "color": "none", "pos": 32768},
+        ]
+    return row
+
+
+def workspace_payload(org_id: str = "c7" + "e" * 22,
+                      display_name: str = "Acme Studio") -> dict:
+    return {
+        "id": org_id,
+        "name": "acmestudio",
+        "displayName": display_name,
+        "desc": "Client work",
+        "website": "https://acme.dev",
+        "idBoards": ["6a" + "2" * 22],
+    }
+
+
 def attachment_payload(att_id: str = "e3" + "b" * 22,
                        name: str = "Brief.pdf",
                        is_upload: bool = False) -> dict:

@@ -13,13 +13,11 @@ if _EXT_DIR not in sys.path:
 # Purge stale cached modules so a fresh load always registers decorators
 # (the validator may run multiple extensions in the same process).
 _LOCAL = ("app", "models", "trello_client", "trello_objects", "accounts",
-          "shared", "handlers_read", "handlers_write", "handlers_inbound",
-          "panels")
+          "shared", "handlers_read", "handlers_write", "panels")
 for _mod in _LOCAL:
     sys.modules.pop(_mod, None)
 
 from app import ext, chat  # noqa: E402,F401
 import handlers_read  # noqa: E402,F401
 import handlers_write  # noqa: E402,F401
-import handlers_inbound  # noqa: E402,F401
 import panels  # noqa: E402,F401

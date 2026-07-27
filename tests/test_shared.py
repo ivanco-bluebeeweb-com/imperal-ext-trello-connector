@@ -210,3 +210,58 @@ def test_checklist_summary_reads_the_card_not_the_array():
     assert shared.to.checklist_summary(card) == "0/3"
     # The array itself carries no badges, so passing it can only ever yield "".
     assert shared.to.checklist_summary(card["checklists"]) == ""
+
+
+# --- custom field value shapes ----------------------------------------------
+# Trello's guide is explicit: the key inside `value` is chosen by the FIELD
+# TYPE, every scalar is sent as a STRING (including number and checkbox), and a
+# dropdown takes an option id under `idValue` with no `value` at all. Getting
+# this wrong is a 400 on some types and a silently ignored write on others.
+
+def test_text_field_shape():
+    assert shared.custom_field_body("text", "Hello", []) == {
+        "value": {"text": "Hello"}}
+
+
+def test_number_goes_in_as_a_string():
+    """A real int would be rejected: Trello wants the number as text."""
+    body = shared.custom_field_body("number", "42", [])
+    assert body == {"value": {"number": "42"}}
+    assert isinstance(body["value"]["number"], str)
+
+
+def test_checkbox_is_normalised_to_trello_strings():
+    for yes in ("true", "yes", "1", "on", "checked"):
+        assert shared.custom_field_body("checkbox", yes, []) == {
+            "value": {"checked": "true"}}
+    for no in ("false", "no", "0", "", "nonsense"):
+        assert shared.custom_field_body("checkbox", no, []) == {
+            "value": {"checked": "false"}}
+
+
+def test_date_field_shape():
+    assert shared.custom_field_body("date", "2026-08-01", []) == {
+        "value": {"date": "2026-08-01"}}
+
+
+def test_dropdown_resolves_the_option_TEXT_to_its_id():
+    """A dropdown takes an option id -- not the text the user typed."""
+    options = [
+        {"id": "aa" + "1" * 22, "value": {"text": "Low"}},
+        {"id": "bb" + "2" * 22, "value": {"text": "High"}},
+    ]
+    assert shared.custom_field_body("list", "High", options) == {
+        "idValue": "bb" + "2" * 22}
+    # Case-insensitive, because the user is typing a label they read.
+    assert shared.custom_field_body("list", "low", options) == {
+        "idValue": "aa" + "1" * 22}
+
+
+def test_dropdown_returns_empty_for_an_unknown_option():
+    """Empty body means REFUSE -- never write nothing while reporting success.
+
+    An unmatched dropdown value must not fall through to {"value": {"text": ...}}:
+    Trello would accept the call and the field would stay visibly unset.
+    """
+    options = [{"id": "aa" + "1" * 22, "value": {"text": "Low"}}]
+    assert shared.custom_field_body("list", "Critical", options) == {}

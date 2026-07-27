@@ -13,8 +13,10 @@ BEFORE anything is written, so a typo fails without leaving a half-made card.
 
 import handlers_write as hw
 from conftest import (TEST_KEY, TEST_TOKEN, attachment_payload, board_payload,
-                      card_payload, checklist_payload, code_of, label_payload,
-                      list_payload, member_payload, succeeded, text_of_result)
+                      card_payload, checklist_payload, code_of,
+                      custom_field_payload, label_payload, list_payload,
+                      member_payload, succeeded, text_of_result,
+                      workspace_payload)
 from models import (AddAttachmentParams, AddCheckItemParams, AddCommentParams,
                     ArchiveCardParams, BoardMemberParams, CardLabelsParams,
                     CardMembersParams, ConnectAccountParams, CopyCardParams,
@@ -22,9 +24,14 @@ from models import (AddAttachmentParams, AddCheckItemParams, AddCommentParams,
                     DeleteAttachmentParams, DeleteBoardParams, DeleteCardParams,
                     DeleteCheckItemParams, DeleteChecklistParams,
                     DeleteCommentParams, DeleteLabelParams, EditCommentParams,
-                    ListBulkParams, MoveCardParams, UpdateBoardParams,
-                    UpdateCardParams, UpdateChecklistParams, UpdateLabelParams,
-                    UpdateListParams)
+                    CreateCustomFieldParams, CustomFieldOptionParams,
+                    DeleteCustomFieldParams, DeleteWorkspaceParams,
+                    CopyBoardParams, MoveListParams, SetCustomFieldParams,
+                    WorkspaceMemberParams,
+                    ListBulkParams, MoveCardParams, StickerParams,
+                    UpdateBoardParams, UpdateCardParams, UpdateChecklistParams,
+                    UpdateLabelParams, UpdateListParams, UpdateWorkspaceParams,
+                    VoteParams)
 
 
 # --- connect ----------------------------------------------------------------
@@ -669,3 +676,297 @@ async def test_update_label_can_change_colour_alone(connected_ctx, http):
     assert body.get("color") == "blue"
     # No empty name in the body: Trello would accept it and erase the label's.
     assert "name" not in body or body["name"]
+
+
+# --- custom fields ----------------------------------------------------------
+# The value shape is decided by the FIELD TYPE. These pin the two cases that
+# fail silently rather than loudly: a dropdown value that matches no option, and
+# a number sent as a JSON number instead of a string.
+
+async def test_dropdown_value_is_sent_as_an_option_id(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload()])          # resolve_custom_field
+    http.push({"id": "it" + "0" * 22})
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="Priority", value="High"))
+    assert succeeded(result) is True
+    body = http.last_body()
+    # The option ID, not the word "High".
+    assert body == {"idValue": "bb" + "2" * 22}, body
+
+
+async def test_unmatched_dropdown_value_is_refused_not_written(
+        connected_ctx, http):
+    """A value matching no option must NOT reach Trello.
+
+    Sending an empty body here returns 200 and changes nothing, which would be
+    reported as "set" -- the field would silently keep its old value.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload()])
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="Priority", value="Urgent-ish"))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_TARGET_NOT_FOUND"
+    # Resolving the board, card and field costs GETs; what must NOT happen is a
+    # WRITE. Asserting "no calls at all" was wrong -- it asserted the resolve
+    # never ran, which is not the claim and made the test fail on correct code.
+    assert [c for c in http.calls if c["method"] != "GET"] == []
+    # The refusal lists what the choices actually are.
+    text = text_of_result(result).lower()
+    assert "low" in text and "high" in text
+
+
+async def test_number_field_value_is_a_string(connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload(name="Estimate", field_type="number",
+                                    with_options=False)])
+    http.push({"id": "it" + "1" * 22})
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="Estimate", value="42"))
+    assert succeeded(result) is True
+    body = http.last_body()
+    assert body == {"value": {"number": "42"}}
+    assert isinstance(body["value"]["number"], str)
+
+
+async def test_clearing_a_field_is_an_empty_put_not_a_delete(
+        connected_ctx, http):
+    """Trello has no delete route for a card's field value."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload(name="Estimate", field_type="number",
+                                    with_options=False)])
+    http.push({})
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="Estimate", clear=True))
+    assert succeeded(result) is True
+    assert http.last_method() == "PUT"
+    assert http.last_body() == {"value": {}}
+
+
+async def test_deleting_a_custom_field_requires_confirmation(
+        connected_ctx, http):
+    """It destroys the value on every card, and Trello has no undo."""
+    result = await hw.delete_custom_field(connected_ctx,
+                                          DeleteCustomFieldParams(
+                                              field="Priority", confirm=False))
+    assert succeeded(result) is False
+    assert http.calls == []
+    assert "every card" in text_of_result(result).lower()
+
+
+async def test_dropdown_without_options_is_refused(connected_ctx, http):
+    """Trello accepts it; the result is a field no value can be set on."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    result = await hw.create_custom_field(connected_ctx,
+                                         CreateCustomFieldParams(
+                                             name="Priority",
+                                             field_type="dropdown"))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_VALIDATION_FAILED"
+
+
+async def test_options_on_a_non_dropdown_field_are_refused(
+        connected_ctx, http):
+    """Only a dropdown has options; the others would silently ignore them."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([custom_field_payload(name="Estimate", field_type="number",
+                                    with_options=False)])
+    result = await hw.set_custom_field_option(connected_ctx,
+                                              CustomFieldOptionParams(
+                                                  field="Estimate",
+                                                  option="Low"))
+    assert succeeded(result) is False
+    assert "not a dropdown" in text_of_result(result).lower()
+
+
+# --- workspaces -------------------------------------------------------------
+
+async def test_deleting_a_workspace_requires_confirmation(connected_ctx, http):
+    result = await hw.delete_workspace(connected_ctx, DeleteWorkspaceParams(
+        workspace="Acme Studio", confirm=False))
+    assert succeeded(result) is False
+    assert http.calls == []
+
+
+async def test_removing_a_workspace_member_says_boards_are_unchanged(
+        connected_ctx, http):
+    """Trello keeps workspace and board membership separate.
+
+    Reporting a bare "removed" would imply an access revocation that has not
+    happened -- the person still reaches every board they were on.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([workspace_payload()])                 # resolve_workspace
+    http.push([{"id": "m9" + "3" * 22, "fullName": "Sam Ray",
+                "username": "samray"}])
+    http.push({})
+    result = await hw.set_workspace_member(connected_ctx,
+                                          WorkspaceMemberParams(
+                                              workspace="Acme Studio",
+                                              member="Sam Ray", remove=True))
+    assert succeeded(result) is True
+    assert http.last_method() == "DELETE"
+    text = text_of_result(result).lower()
+    assert "board" in text and "unchanged" in text
+
+
+# --- board copy / list move -------------------------------------------------
+
+async def test_copying_a_board_without_cards_keeps_none(connected_ctx, http):
+    """keepFromSource is Trello's own vocabulary: "cards" or "none"."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push({"id": "nb" + "4" * 22, "name": "Template",
+               "url": "https://trello.com/b/xyz"})
+    result = await hw.copy_board(connected_ctx, CopyBoardParams(
+        board="Client Work", name="Template", keep_cards=False))
+    assert succeeded(result) is True
+    assert http.last_body().get("keepFromSource") == "none"
+    assert http.last_body().get("idBoardSource")
+
+
+async def test_moving_a_list_to_its_own_board_is_refused(connected_ctx, http):
+    """A no-op move would report success while nothing moved."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([list_payload(name="Today")])
+    http.push(member_payload())
+    http.push([board_payload()])
+    result = await hw.move_list_to_board(connected_ctx, MoveListParams(
+        list_name="Today", to_board="Client Work"))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_VALIDATION_FAILED"
+
+
+# --- stickers and votes ------------------------------------------------------
+
+async def test_removing_a_sticker_finds_it_by_image_name(connected_ctx, http):
+    """Removal needs the sticker's id, which the user does not have."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([{"id": "st" + "1" * 22, "image": "taco-cool"}])
+    http.push({})
+    result = await hw.set_sticker(connected_ctx, StickerParams(
+        card="Fix hero", sticker="taco-cool", remove=True))
+    assert succeeded(result) is True
+    assert http.last_method() == "DELETE"
+    assert "st" + "1" * 22 in http.last_path()
+
+
+async def test_removing_an_absent_sticker_says_what_is_there(
+        connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([{"id": "st" + "1" * 22, "image": "thumbsup"}])
+    result = await hw.set_sticker(connected_ctx, StickerParams(
+        card="Fix hero", sticker="taco-cool", remove=True))
+    assert succeeded(result) is False
+    assert "thumbsup" in text_of_result(result)
+    assert [c for c in http.calls if c["method"] != "GET"] == []
+
+
+async def test_vote_uses_the_membersVoted_route(connected_ctx, http):
+    """A vote is a member added to the card's voters, not a counter."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push(member_payload())
+    http.push({})
+    result = await hw.set_vote(connected_ctx, VoteParams(card="Fix hero"))
+    assert succeeded(result) is True
+    assert "membersVoted" in http.last_path()
+
+
+# --- workspaces --------------------------------------------------------------
+
+async def test_removing_a_workspace_member_is_not_a_deactivation(
+        connected_ctx, http):
+    """Trello has two different removals; this tool must use the plain one."""
+    # Call order, TRACED not assumed: GET members/me, GET members/me/boards
+    # (both from the credential resolve), GET members/me/organizations to
+    # resolve the workspace, GET its members to turn a name into an id, DELETE.
+    # Queuing one payload for the credential step left everything after it
+    # reading the wrong response.
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([workspace_payload()])
+    http.push([{"id": "9c" + "7" * 22, "fullName": "Teammate",
+                "username": "teammate"}])
+    http.push({})
+    result = await hw.set_workspace_member(connected_ctx,
+                                          WorkspaceMemberParams(
+                                              workspace="Acme Studio",
+                                              member="teammate",
+                                              remove=True))
+    assert succeeded(result) is True
+    assert http.last_method() == "DELETE"
+    # `/all` would remove them from every board too -- a far bigger action.
+    assert not http.last_path().endswith("/all")
+
+
+async def test_deleting_a_workspace_requires_confirmation(connected_ctx, http):
+    result = await hw.delete_workspace(connected_ctx, DeleteWorkspaceParams(
+        workspace="Acme Studio", confirm=False))
+    assert succeeded(result) is False
+    assert code_of(result) == "TRELLO_VALIDATION_FAILED"
+    assert http.calls == []
+
+
+async def test_updating_a_workspace_refuses_an_empty_change(
+        connected_ctx, http):
+    result = await hw.update_workspace(connected_ctx, UpdateWorkspaceParams(
+        workspace="Acme Studio"))
+    assert succeeded(result) is False
+    # The guard is checked BEFORE credentials, so a no-op reports the malformed
+    # request rather than a connection problem the user does not have.
+    assert code_of(result) == "TRELLO_VALIDATION_FAILED"
+    assert http.calls == []
+
+
+# --- board copy and cross-board list move -----------------------------------
+
+async def test_copy_board_sends_the_source_as_idBoardSource(
+        connected_ctx, http):
+    """A copy is a CREATE with a source, not a copy endpoint."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push({"id": "n7" + "9" * 22, "name": "Client Work (copy)",
+               "url": "https://trello.com/b/xyz"})
+    result = await hw.copy_board(connected_ctx, CopyBoardParams(
+        board="Client Work", name="Client Work (copy)"))
+    assert succeeded(result) is True
+    assert http.last_method() == "POST"
+    # The client sends `data` as the JSON BODY; only key/token ride the query
+    # string. Asserting on last_params() checked the wrong half of the request.
+    assert http.last_body().get("idBoardSource")
+
+
+async def test_moving_a_list_to_another_board_names_the_target(
+        connected_ctx, http):
+    http.push(member_payload())
+    http.push([board_payload(), board_payload(board_id="d8" + "4" * 22,
+                                              name="Archive board")])
+    http.push([list_payload(name="Today")])
+    http.push([board_payload(), board_payload(board_id="d8" + "4" * 22,
+                                              name="Archive board")])
+    http.push({"id": "6a" + "3" * 22, "name": "Today"})
+    # The SOURCE board is named too: with two boards reachable, leaving it out
+    # is genuinely ambiguous and the connector is right to refuse.
+    result = await hw.move_list_to_board(connected_ctx, MoveListParams(
+        board="Client Work", list_name="Today", to_board="Archive board"))
+    assert succeeded(result) is True
+    assert "idBoard" in (http.last_path() + str(http.last_params()))
