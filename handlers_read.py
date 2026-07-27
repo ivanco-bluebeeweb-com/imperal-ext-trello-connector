@@ -308,7 +308,10 @@ async def get_card(ctx, params: GetCardParams) -> ActionResult:
     # without a second call, so it is folded into the card the user sees.
     entity.list_name = to.name_of(raw.get("list")) or entity.list_name
 
-    checklists = to.checklist_summary(raw.get("checklists"))
+    # `checklist_summary` reads `badges` off the CARD, so it takes the card --
+    # not the checklists array. Passing the array made it return "" every time,
+    # which is why a card holding a 0/3 checklist reported none.
+    checklists = to.checklist_summary(raw)
     summary = f"Card '{entity.name}'"
     if entity.list_name:
         summary += f" in list '{entity.list_name}'"

@@ -174,3 +174,39 @@ def test_list_entity_counts_zero_when_cards_absent():
     col = shared.list_entity({"id": "L1", "name": "Today"})
 
     assert col.card_count == 0
+
+
+def test_card_entity_reports_the_badge_counts():
+    """Comments and attachments come from `badges`.
+
+    Trello returns only the fields a request names, and `badges` was missing
+    from CARD_FIELDS -- so a card with a comment and a checklist on it reported
+    comment_count 0 and an empty checklist summary. The numbers looked like
+    facts about an empty card rather than fields nobody had asked for.
+    """
+    card = shared.card_entity({
+        "id": "C1",
+        "name": "Webbee write probe",
+        "badges": {"comments": 1, "attachments": 2,
+                   "checkItems": 3, "checkItemsChecked": 1},
+    })
+
+    assert card.comment_count == 1
+    assert card.attachment_count == 2
+    assert card.checklist_summary == "1/3"
+
+
+def test_checklist_summary_reads_the_card_not_the_array():
+    """The progress lives in the card's badges, so the CARD is the argument.
+
+    Both call sites passed `data["checklists"]` -- a LIST -- to a function that
+    reads `badges` off a dict. It returned "" unconditionally, which is
+    indistinguishable from "this card has no checklists".
+    """
+    card = {"id": "C1", "name": "x",
+            "badges": {"checkItems": 3, "checkItemsChecked": 0},
+            "checklists": [{"id": "CL1", "name": "Проверка"}]}
+
+    assert shared.to.checklist_summary(card) == "0/3"
+    # The array itself carries no badges, so passing it can only ever yield "".
+    assert shared.to.checklist_summary(card["checklists"]) == ""

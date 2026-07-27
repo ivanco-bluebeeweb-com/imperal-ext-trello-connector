@@ -249,8 +249,12 @@ def card_summary(card) -> str:
 # Field sets requested explicitly. Trello returns a LARGE default object for
 # cards and boards; naming fields keeps responses small and, more importantly,
 # makes it obvious which facts the display depends on.
+# `badges` carries the counts Trello itself shows on a card front: comments,
+# attachments, checklist progress. It is NOT included by default -- Trello
+# returns only the fields named here -- so omitting it left comment_count and
+# attachment_count permanently 0 on a card that visibly had both.
 CARD_FIELDS = ("id,name,desc,closed,due,dueStart,dueComplete,idList,idBoard,"
-               "idMembers,labels,shortUrl,url,dateLastActivity,pos")
+               "idMembers,labels,shortUrl,url,dateLastActivity,pos,badges")
 BOARD_FIELDS = ("id,name,desc,closed,url,shortUrl,shortLink,idOrganization,"
                 "dateLastActivity,prefs")
 LIST_FIELDS = "id,name,closed,idBoard,pos"

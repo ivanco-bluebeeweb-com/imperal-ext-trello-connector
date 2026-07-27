@@ -224,7 +224,8 @@ def card_entity(row, list_names: dict | None = None) -> "object":
         labels=to.label_names(data),
         desc=to.text_of(data, "desc"),
         comment_count=int(badges.get("comments") or 0),
-        checklist_summary=to.checklist_summary(data.get("checklists")),
+        # The CARD, not `data["checklists"]`: the progress lives in `badges`.
+        checklist_summary=to.checklist_summary(data),
         attachment_count=int(badges.get("attachments") or 0),
         url=str(data.get("shortUrl") or data.get("url") or ""),
         modified=str(data.get("dateLastActivity") or ""),

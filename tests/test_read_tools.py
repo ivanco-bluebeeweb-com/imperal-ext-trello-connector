@@ -87,6 +87,31 @@ async def test_get_card_reads_actual_content(connected_ctx, http):
     assert result.data.list_name == "In Progress"
 
 
+async def test_get_card_asks_for_badges_and_reports_the_counts(
+        connected_ctx, http):
+    """The counts a user sees on a card front must survive the round trip.
+
+    Trello returns ONLY the fields a request names. `badges` was absent from
+    CARD_FIELDS, so comment_count and attachment_count were structurally
+    present and permanently 0 -- a card with two comments read as a card with
+    none. Asserting the entity alone would not have caught it: the flattener
+    was always correct, the REQUEST was not. So the request is asserted too.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    card = card_payload()
+    card["badges"] = {"comments": 2, "attachments": 1,
+                      "checkItems": 3, "checkItemsChecked": 1}
+    http.push(card)
+    result = await hr.get_card(connected_ctx, GetCardParams(card="8d" + "5" * 22))
+    assert succeeded(result) is True
+
+    assert "badges" in http.last_params().get("fields", "")
+    assert result.data.comment_count == 2
+    assert result.data.attachment_count == 1
+    assert result.data.checklist_summary == "1/3"
+
+
 # --- comments --------------------------------------------------------------
 
 async def test_comments_read_from_actions(connected_ctx, http):
