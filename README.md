@@ -138,15 +138,21 @@ of these was found by calling the real Trello, with all tests passing:
 * The failure said only *"The Trello request failed."* Trello had named the
   offending field in the response body; the client echoed that text for one
   status code and discarded it for the rest.
-* Clearing a custom field worked for text, number, date and checkbox and was
-  rejected for a dropdown — two mutually exclusive body shapes, one of which was
-  never exercised.
+* Clearing a custom field took **three** live rounds to get right, each one
+  disproving the fix before it. A dropdown rejected the body that worked for
+  scalars (it has no `value` to empty, only an option id to unset). The obvious
+  replacement, an empty `value` object, turned out to be rejected for *every*
+  type — clearing means writing the field's own key as an empty string. And then
+  `date` rejected that too, because `""` is not a date-time, so a date is the one
+  type that genuinely needs a bare empty `value`. A regression test had asserted
+  the very body Trello refuses, and passed.
 * `set_vote` blamed the token for a refusal caused by a board **preference**,
   sending the user to regenerate credentials that were working seconds earlier.
 * A board copied successfully then resolved as *"no reachable board matches"* —
   a cached board list that three writes changed without invalidating.
 * A workspace description, once set, could not be removed at all: an empty
-  string means "not given", so nothing could express "clear it".
+  string means "not given", so nothing could express "clear it". Found by trying
+  to undo a test edit and discovering the connector could not.
 
 The pattern is worth naming: tests written alongside code share the code's
 assumptions, so they confirm the shape the author already believed. Only the real
