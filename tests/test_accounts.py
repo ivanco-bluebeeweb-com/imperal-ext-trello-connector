@@ -220,3 +220,51 @@ async def test_an_unfamiliar_shape_defers_to_trello(ctx, http):
     out = await acct.add_pair(ctx, "abc123xyz", "some-token-value")
     assert out["ok"] is True
     assert http.calls != []
+
+
+# --- rejection must be diagnosable -----------------------------------------
+# Trello's "invalid key" is identical whether the key was 8 characters, 40, or
+# a perfect 32 that was revoked. Those need opposite actions, so the observed
+# SHAPE is reported back.
+
+async def test_rejection_reports_the_observed_lengths(ctx, http):
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, "abcd1234", TEST_TOKEN)
+    assert out["ok"] is False
+    assert "8 characters" in out["error"]
+    assert "32 characters" in out["error"]
+
+
+async def test_a_wrong_length_key_is_named_as_impossible(ctx, http):
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, "a" * 40, TEST_TOKEN)
+    assert "not one" in out["error"]
+
+
+async def test_a_correctly_shaped_key_points_at_the_credential(ctx, http):
+    """A right-shaped key that Trello still rejects is NOT a paste mistake."""
+    http.push("invalid token", status=401)
+    out = await acct.add_pair(ctx, TEST_KEY, TEST_TOKEN)
+    assert out["ok"] is False
+    low = out["error"].lower()
+    assert "revoked" in low or "expired" in low
+    # It must NOT tell the user to re-copy a key that is already correct.
+    assert "different key" in low or "fresh token" in low
+
+
+async def test_non_hex_characters_are_flagged(ctx, http):
+    http.push("invalid key", status=401)
+    out = await acct.add_pair(ctx, "z" * 32, TEST_TOKEN)
+    assert "outside 0-9" in out["error"]
+
+
+async def test_the_shape_note_never_leaks_the_credential(ctx, http):
+    """A credential must not become readable through an error message."""
+    http.push("invalid key", status=401)
+    secret_key = "feed" + "1" * 28
+    out = await acct.add_pair(ctx, secret_key, TEST_TOKEN)
+    assert secret_key not in out["error"]
+    assert TEST_TOKEN not in out["error"]
+    # Not even a prefix: any 6-char run of the real value would be a leak.
+    assert secret_key[:6] not in out["error"]
+    assert TEST_TOKEN[:6] not in out["error"]

@@ -203,6 +203,53 @@ def _shape_complaint(key: str, token: str):
     return None
 
 
+def _shape_note(key: str, token: str) -> str:
+    """Describe what ARRIVED, so a rejection is diagnosable without a guess.
+
+    Trello's rejection is a bare "invalid key" -- true, but it does not say
+    whether the key was 8 characters, 40, or a correct 32 that has been revoked.
+    Those need opposite actions (fix the paste vs generate a new token), and
+    without knowing which, the user re-copies a correct value and gets the same
+    sentence back. This states the observed lengths and flags one that cannot be
+    right, so the NEXT attempt is informed rather than another shot in the dark.
+
+    Only LENGTH and CHARACTER CLASS are reported -- never the values, not even a
+    prefix. A credential must not become readable through an error message, and
+    a length is enough to identify every realistic paste mistake.
+    """
+    key_hex = all(c in "0123456789abcdefABCDEF" for c in key)
+    token_hex = all(c in "0123456789abcdefABCDEF" for c in token)
+
+    parts = [f"What arrived: key {len(key)} characters"
+             f"{'' if key_hex else ' (contains non-hex characters)'}, "
+             f"token {len(token)} characters"
+             f"{'' if token_hex else ' (contains non-hex characters)'}."]
+
+    # A Trello API key is 32 hex characters. Any other length cannot be one, so
+    # say so plainly -- that is the difference between "fix your paste" and
+    # "your credential was revoked".
+    if len(key) != 32:
+        parts.append(
+            f"A Trello API key is exactly 32 characters, so a {len(key)}-"
+            "character value is not one -- check you copied the API Key field "
+            "itself and not a surrounding label, URL or partial selection.")
+    elif not key_hex:
+        parts.append(
+            "The key is the right length but contains characters outside 0-9 "
+            "and a-f, which a Trello key never does -- something extra was "
+            "picked up in the copy.")
+    else:
+        # The key is exactly the right shape, so the paste is not the problem:
+        # this is a revoked/expired credential or a key-token mismatch.
+        parts.append(
+            "The key is exactly the right shape, so the paste is fine -- this "
+            "is a credential problem, not a typing one. Either the token was "
+            "revoked or expired, or the token was generated with a DIFFERENT "
+            "key (a token only works with the key that created it). Generate a "
+            "fresh token from the Token link beside THIS key and reconnect.")
+    return " ".join(parts)
+
+
 async def add_pair(ctx, key: str, token: str) -> dict:
     """Validate a credential pair against Trello, then store it.
 
@@ -235,8 +282,16 @@ async def add_pair(ctx, key: str, token: str) -> dict:
     # Trello's own verdict first -- identifies the account as a side effect.
     info = await describe_pair(ctx, key, token)
     if not info.get("ok"):
-        return tc.fail(info.get("code") or tc.TRELLO_TOKEN_REJECTED,
-                       info.get("error") or tc.message_for(tc.TRELLO_TOKEN_REJECTED))
+        # Trello's rejection names WHICH half it disliked but says nothing about
+        # what actually arrived, so the same sentence comes back whether the key
+        # was 8 characters, 40, or a perfect 32 that has since been revoked.
+        # That is a dead end: re-copying a correct key changes nothing and the
+        # user has no way to tell which case they are in. Describing the
+        # OBSERVED SHAPE turns the second attempt into a diagnosis.
+        return tc.fail(
+            info.get("code") or tc.TRELLO_TOKEN_REJECTED,
+            (info.get("error") or tc.message_for(tc.TRELLO_TOKEN_REJECTED))
+            + " " + _shape_note(key, token))
 
     existing = await read_pairs(ctx)
     if not existing.get("ok"):
