@@ -5733,6 +5733,18 @@
   "schedules": [],
   "required_scopes": [],
   "icon_size_bytes": 291,
+  "webhooks": [
+    {
+      "path": "/head_probe",
+      "method": "HEAD",
+      "secret_header": ""
+    },
+    {
+      "path": "/events",
+      "method": "POST",
+      "secret_header": ""
+    }
+  ],
   "lifecycle": {
     "on_install": true,
     "health_check": {
