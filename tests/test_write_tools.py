@@ -12,6 +12,7 @@ BEFORE anything is written, so a typo fails without leaving a half-made card.
 """
 
 import handlers_write as hw
+import shared
 from conftest import (TEST_KEY, TEST_TOKEN, attachment_payload, board_payload,
                       card_payload, checklist_payload, code_of,
                       custom_field_payload, label_payload, list_payload,
@@ -763,7 +764,13 @@ async def test_clearing_a_dropdown_unsets_the_option_id(connected_ctx, http):
 
 async def test_clearing_a_field_is_an_empty_put_not_a_delete(
         connected_ctx, http):
-    """Trello has no delete route for a card's field value."""
+    """Trello has no delete route for a card's field value.
+
+    This test ASSERTED THE WRONG BODY until a live call disproved it. It expected
+    {"value": {}}, the mock accepted it, and the suite was green -- while the real
+    API answered HTTP 400 "Invalid custom field item value". A mock written from
+    the same belief as the code cannot contradict it.
+    """
     http.push(member_payload())
     http.push([board_payload()])
     http.push([card_payload(name="Fix hero")])
@@ -774,7 +781,48 @@ async def test_clearing_a_field_is_an_empty_put_not_a_delete(
         card="Fix hero", field="Estimate", clear=True))
     assert succeeded(result) is True
     assert http.last_method() == "PUT"
-    assert http.last_body() == {"value": {}}
+    # The field's OWN key, emptied -- not a generic empty object.
+    assert http.last_body() == {"value": {"number": ""}}
+
+
+async def test_every_scalar_type_clears_through_its_own_key(
+        connected_ctx, http):
+    """text, date, checkbox and number each empty a DIFFERENT key.
+
+    The dropdown fix proved clearing was type-dependent and then assumed one
+    shape covered every scalar. It does not, and live calls on a text and a date
+    field are what exposed the remaining half.
+    """
+    # Asserted on the BODY BUILDER directly rather than by looping the handler:
+    # the first call caches the account, so a second iteration needs a different
+    # number of queued responses than the first and the queue silently
+    # desynchronises -- the loop failed on `date` for that reason, not because
+    # date was wrong. The mapping is the thing under test here; the handler's use
+    # of it is covered by the tests either side of this one.
+    assert shared.custom_field_clear_body("text") == {"value": {"text": ""}}
+    assert shared.custom_field_clear_body("date") == {"value": {"date": ""}}
+    assert shared.custom_field_clear_body("number") == {"value": {"number": ""}}
+    assert shared.custom_field_clear_body("checkbox") == {
+        "value": {"checked": ""}}
+    # A dropdown is the odd one out: no `value` at all, mutually exclusive.
+    dropdown = shared.custom_field_clear_body("list")
+    assert dropdown == {"idValue": ""}
+    assert "value" not in dropdown
+
+
+async def test_an_unknown_field_type_clears_as_text(connected_ctx, http):
+    """Trello may add types. Falling back to `text` matches how values are set,
+    so a new type degrades to the most likely shape instead of crashing."""
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push([custom_field_payload(name="F", field_type="something_new",
+                                    with_options=False)])
+    http.push({})
+    result = await hw.set_custom_field(connected_ctx, SetCustomFieldParams(
+        card="Fix hero", field="F", clear=True))
+    assert succeeded(result) is True
+    assert http.last_body() == {"value": {"text": ""}}
 
 
 async def test_deleting_a_custom_field_requires_confirmation(

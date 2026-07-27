@@ -551,6 +551,40 @@ def custom_field_body(field_type: str, value: str,
     return {"value": {"text": text}}
 
 
+# The key inside `value` that each scalar field type is written through. Setting
+# and CLEARING both go through this same key -- which is the whole point of
+# having it in one place.
+_CUSTOM_FIELD_VALUE_KEYS = {
+    "checkbox": "checked",
+    "number": "number",
+    "date": "date",
+    "text": "text",
+}
+
+
+def custom_field_clear_body(field_type: str) -> dict:
+    """Build the PUT body that EMPTIES one custom field value.
+
+    An empty `value` object -- {"value": {}} -- looks like the obvious way to say
+    "no value" and is REJECTED LIVE with HTTP 400 "Invalid custom field item
+    value". Found on a text and a date field after the dropdown case had already
+    been fixed, which is exactly why the scalar case slipped: the dropdown fix
+    proved clearing was type-dependent and then assumed one shape covered every
+    scalar.
+
+    Trello has no "empty" body. Clearing is setting the field's OWN key to an
+    empty string, so it uses the same key as writing a value does -- the shared
+    map above is what keeps those two from drifting apart. A dropdown has no
+    `value` at all: it carries an option id, so it is emptied by unsetting that.
+    """
+    kind = (field_type or "").strip().lower()
+    if kind == "list":
+        return {"idValue": ""}
+    # Unknown types fall back to `text`, matching how custom_field_body treats
+    # anything Trello adds later that behaves like text.
+    return {"value": {_CUSTOM_FIELD_VALUE_KEYS.get(kind, "text"): ""}}
+
+
 async def resolve_workspace(ctx, creds, reference: str) -> dict:
     """Resolve a workspace (organization) by name or id.
 

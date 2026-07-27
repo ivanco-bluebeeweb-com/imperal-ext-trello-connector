@@ -1963,16 +1963,15 @@ async def set_custom_field(ctx, params: SetCustomFieldParams) -> ActionResult:
     path = f"cards/{card['id']}/customField/{field['id']}/item"
 
     if params.clear:
-        # CLEARING IS TYPE-DEPENDENT TOO, which the first version missed. The
-        # spec defines the body as a oneOf: a scalar carries {"value": {...}},
-        # a dropdown carries {"idValue": ...}, and the two are mutually
-        # exclusive. Sending {"value": {}} at a dropdown is rejected live with
-        # "Invalid custom field item value" -- because a dropdown has no `value`
-        # to empty; it has an option id to unset.
-        clear_body: dict = (
-            {"idValue": ""}
-            if (field.get("field_type") or "").strip().lower() == "list"
-            else {"value": {}})
+        # CLEARING IS TYPE-DEPENDENT, and getting it right took two live
+        # findings. First a dropdown rejected {"value": {}}, because a dropdown
+        # has no `value` to empty -- it has an option id to unset. Then a TEXT
+        # and a DATE field rejected {"value": {}} as well, with the same HTTP 400
+        # "Invalid custom field item value": there is no generic empty body at
+        # all. Clearing means writing the field's own key as an empty string, so
+        # it goes through the same key map as setting a value.
+        clear_body = shared.custom_field_clear_body(
+            field.get("field_type") or "")
         out = await tc.request(ctx, "PUT", path, creds, data=clear_body)
         if not out.get("ok"):
             return _from_envelope(out)
