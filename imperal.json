@@ -7240,7 +7240,7 @@
     },
     {
       "name": "update_workspace",
-      "description": "Rename a Trello workspace or change its description or website.",
+      "description": "Rename a Trello workspace, change its description or website, or clear the description or website entirely.",
       "action_type": "write",
       "chain_callable": true,
       "effects": [
@@ -7271,6 +7271,18 @@
             "description": "New website URL",
             "title": "Website",
             "type": "string"
+          },
+          "clear_desc": {
+            "default": false,
+            "description": "Remove the description entirely",
+            "title": "Clear Desc",
+            "type": "boolean"
+          },
+          "clear_website": {
+            "default": false,
+            "description": "Remove the website entirely",
+            "title": "Clear Website",
+            "type": "boolean"
           }
         },
         "required": [

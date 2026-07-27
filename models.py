@@ -476,6 +476,18 @@ class UpdateWorkspaceParams(BaseModel):
     name: str = Field("", description="New name")
     desc: str = Field("", description="New description")
     website: str = Field("", description="New website URL")
+    # EMPTY STRING CANNOT MEAN "CLEAR IT" here: it is also what an unset field
+    # looks like, so a blank `desc` is indistinguishable from not asking to
+    # change the description at all. Without an explicit flag there is simply no
+    # way to REMOVE a description or website once one is set -- found while
+    # trying to undo a test edit and discovering the connector could not.
+    #
+    # There is no clear_name: Trello requires a workspace to have a displayName,
+    # so offering to empty it would promise something the API refuses.
+    clear_desc: bool = Field(
+        False, description="Remove the description entirely")
+    clear_website: bool = Field(
+        False, description="Remove the website entirely")
 
 
 class DeleteWorkspaceParams(BaseModel):

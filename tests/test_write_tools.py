@@ -1148,3 +1148,37 @@ async def test_renaming_a_board_drops_the_cache(
         board="Client Work", name="Renamed"))
     assert succeeded(result) is True
     assert dropped
+
+
+async def test_workspace_description_can_be_cleared(connected_ctx, http):
+    """An empty string cannot mean "clear it" -- it means "not given".
+
+    Found while trying to UNDO a test edit: a description set by mistake could
+    not be removed, because a blank `desc` is indistinguishable from not asking
+    to change the description at all. The guard correctly refused it as an empty
+    change, which left no way to empty the field. An explicit flag is the only
+    thing that can carry the difference.
+    """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([{"id": "ws" + "9" * 22, "displayName": "Studio"}])
+    http.push({"id": "ws" + "9" * 22, "displayName": "Studio"})
+    result = await hw.update_workspace(connected_ctx, UpdateWorkspaceParams(
+        workspace="Studio", clear_desc=True))
+    assert succeeded(result) is True
+    assert http.last_body() == {"desc": ""}
+
+
+async def test_setting_and_clearing_the_same_field_is_refused(
+        connected_ctx, http):
+    """A contradiction is not something to resolve by precedence.
+
+    Honouring one silently would do half the request and report success for all
+    of it -- the same dishonesty as a no-op reported as a write.
+    """
+    result = await hw.update_workspace(connected_ctx, UpdateWorkspaceParams(
+        workspace="Studio", desc="new text", clear_desc=True))
+    assert succeeded(result) is False
+    assert "pick one" in text_of_result(result).lower()
+    # Refused before any network call: a contradiction needs no credentials.
+    assert http.calls == []

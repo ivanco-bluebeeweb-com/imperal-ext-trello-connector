@@ -2333,7 +2333,8 @@ async def create_workspace(ctx, params: CreateWorkspaceParams) -> ActionResult:
 
 @chat.function(
     "update_workspace",
-    "Rename a Trello workspace or change its description or website.",
+    "Rename a Trello workspace, change its description or website, or clear "
+    "the description or website entirely.",
     action_type="write", chain_callable=True,
     data_model=WriteResult,
     event="trello-connector.update_workspace",
@@ -2352,10 +2353,30 @@ async def update_workspace(ctx, params: UpdateWorkspaceParams) -> ActionResult:
     if (params.name or "").strip():
         body["displayName"] = params.name.strip()
         changed.append("name")
-    if (params.desc or "").strip():
+
+    # A SET AND A CLEAR ON THE SAME FIELD IS A CONTRADICTION, not something to
+    # resolve by precedence. Picking one silently would carry out half the
+    # request and report success for all of it.
+    if params.clear_desc and (params.desc or "").strip():
+        return _error(
+            "Asked to both set and clear the description. Pick one.",
+            tc.TRELLO_VALIDATION_FAILED)
+    if params.clear_website and (params.website or "").strip():
+        return _error(
+            "Asked to both set and clear the website. Pick one.",
+            tc.TRELLO_VALIDATION_FAILED)
+
+    if params.clear_desc:
+        body["desc"] = ""
+        changed.append("description cleared")
+    elif (params.desc or "").strip():
         body["desc"] = params.desc.strip()
         changed.append("description")
-    if (params.website or "").strip():
+
+    if params.clear_website:
+        body["website"] = ""
+        changed.append("website cleared")
+    elif (params.website or "").strip():
         body["website"] = params.website.strip()
         changed.append("website")
 
