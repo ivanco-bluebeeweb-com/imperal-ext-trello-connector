@@ -391,12 +391,23 @@ async def test_no_message_claims_a_token_link_beside_the_key(ctx, http):
     BELOW the key. Directing someone to a button that is not there is worse
     than saying nothing, because they conclude their page is broken.
     """
-    import trello_client as _tc
-    for code, text in _tc._MESSAGES.items():
-        low = text.lower()
-        assert "beside it" not in low, code
-        assert "beside the key" not in low, code
-        assert "beside this key" not in low, code
+    # Scanning only the curated messages is how this slipped back in: the
+    # phantom control also lived in the tool description, the secret
+    # declaration, the params model and check_access's next_step -- text the
+    # user reads BEFORE any error. So walk every source file instead.
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = []
+    for src in sorted(root.glob("*.py")):
+        for n, line in enumerate(src.read_text().splitlines(), 1):
+            low = line.lower()
+            if low.lstrip().startswith("#"):
+                continue          # commentary may discuss the mistake
+            for phrase in ("beside it", "beside the key", "beside this key"):
+                # "no button beside the key" is the correction, not the claim.
+                if phrase in low and "not beside" not in low and "no button" not in low:
+                    offenders.append(f"{src.name}:{n}: {line.strip()}")
+    assert not offenders, "phantom 'Token' control still described:\n" + "\n".join(offenders)
 
     # And the same for the live rejection branches, which are built at runtime.
     http.push("invalid key", status=401)

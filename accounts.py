@@ -242,11 +242,11 @@ async def key_is_live(ctx, key: str) -> bool | None:
 def _authorize_url(key: str) -> str:
     """Build the ready-made authorize link for one key.
 
-    Why a link and not instructions. The admin page has no 'Token' control
-    beside the key -- the manual link is buried in a paragraph below it, and
-    Atlassian rearranges that page. Describing furniture that moves is how the
-    connector ended up sending people to a button that was not there, and a
-    user who cannot find it concludes their own page is broken.
+    Why a link and not instructions. The admin page has
+    no button beside the key -- the manual link is buried in a paragraph
+    below it, and Atlassian rearranges that page. Describing furniture that
+    moves is how the connector ended up sending people to a control that was
+    not there, and a user who cannot find it concludes their page is broken.
 
     This URL needs nothing but the key: opening it renders Trello's Allow
     prompt and hands back a token bound to THIS key. `expiration=never` because

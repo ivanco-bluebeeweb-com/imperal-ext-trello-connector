@@ -1439,7 +1439,7 @@
           },
           "token": {
             "default": "",
-            "description": "Trello token -- generated with that key by clicking the 'Token' link beside it and allowing access.",
+            "description": "Trello token -- generated for that same key through Trello's Allow prompt. NOT the Secret shown under the key: that signs OAuth and cannot authorise a call.",
             "title": "Token",
             "type": "string"
           }
@@ -3243,7 +3243,7 @@
   "secrets": [
     {
       "name": "trello_credentials",
-      "description": "Trello API key and token -- one 'key:token' pair per line, one line per account. Generate the key at trello.com/apps/admin (Power-Up -> API Key), then click the 'Token' link beside it to authorise your own account. A token reaches every board its owner can see.",
+      "description": "Trello API key and token -- one 'key:token' pair per line, one line per account. Generate the key at trello.com/apps/admin (Power-Up -> API Key), then authorise your own account through Trello's Allow prompt to get a token for that key. A token reaches every board its owner can see.",
       "required": true,
       "write_mode": "both",
       "max_bytes": 4096,

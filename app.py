@@ -74,8 +74,8 @@ ext.secret(
     "trello_credentials",
     "Trello API key and token -- one 'key:token' pair per line, one line per "
     "account. Generate the key at trello.com/apps/admin (Power-Up -> API Key), "
-    "then click the 'Token' link beside it to authorise your own account. A "
-    "token reaches every board its owner can see.",
+    "then authorise your own account through Trello's Allow prompt to get a "
+    "token for that key. A token reaches every board its owner can see.",
     required=True,
     # "both" -- Panel UI writes it (Secrets manager) AND the app writes it
     # itself from the Connect screen.

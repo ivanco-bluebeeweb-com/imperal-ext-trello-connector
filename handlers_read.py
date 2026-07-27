@@ -82,8 +82,8 @@ async def list_accounts(ctx, params: ListAccountsParams) -> ActionResult:
     if not entries:
         return _error(
             "No Trello credentials are configured yet. Trello needs a PAIR: an "
-            "API key from trello.com/apps/admin and a token from the authorise "
-            "prompt beside it. Paste them on the Connect screen.",
+            "API key from trello.com/apps/admin and a token from Trello's "
+            "Allow prompt for that key. Paste them on the Connect screen.",
             tc.TRELLO_CREDENTIALS_MISSING)
 
     items = [
@@ -547,8 +547,8 @@ async def check_access(ctx, params: CheckAccessParams) -> ActionResult:
                 next_step=(
                     "Paste an API key and token on the Connect screen. The key "
                     "comes from the API Key tab of your Power-Up at "
-                    "trello.com/apps/admin; the token from the 'Token' link "
-                    "beside it."),
+                    "trello.com/apps/admin; the token comes from Trello's "
+                    "Allow prompt for that same key."),
             ),
             "Trello is not connected yet.")
 

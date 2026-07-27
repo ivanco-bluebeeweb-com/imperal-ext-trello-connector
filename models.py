@@ -45,8 +45,9 @@ class ConnectAccountParams(BaseModel):
         "", description="Trello API key -- 32 hex characters, from the API Key "
                         "tab of your Power-Up at trello.com/apps/admin.")
     token: str = Field(
-        "", description="Trello token -- generated with that key by clicking "
-                        "the 'Token' link beside it and allowing access.")
+        "", description="Trello token -- generated for that same key through "
+                        "Trello's Allow prompt. NOT the Secret shown under the "
+                        "key: that signs OAuth and cannot authorise a call.")
 
 
 class ListBoardsParams(BaseModel):
