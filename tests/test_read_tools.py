@@ -309,3 +309,26 @@ async def test_the_result_warns_the_secret_is_not_a_token(ctx, http):
     http.push("<html>Allow</html>", status=200)
     result = await hr.get_token_link(ctx, GetTokenLinkParams(key=TEST_KEY))
     assert "secret" in result.data.next_step.lower()
+
+
+# --- naming a connected account ---------------------------------------------
+# check_access exists to answer "is this working?". Live, a healthy connection
+# reported "Connected as unnamed (@ivancovlad)" -- because Trello had left
+# fullName empty and the code fell through to a literal. A tool whose job is
+# reassurance must not read as a fault.
+
+def test_the_username_is_used_when_trello_gives_no_full_name():
+    out = hr._describe_account({"account_name": "", "username": "ivancovlad"})
+    assert out == "@ivancovlad"
+    assert "unnamed" not in out
+
+
+def test_the_full_name_wins_when_both_are_known():
+    out = hr._describe_account(
+        {"account_name": "Vlad Ivanco", "username": "ivancovlad"})
+    assert out == "Vlad Ivanco (@ivancovlad)"
+
+
+def test_unnamed_only_when_the_account_has_neither():
+    """Still honest in the one case where nothing is actually known."""
+    assert hr._describe_account({"account_name": "", "username": ""}) == "unnamed"

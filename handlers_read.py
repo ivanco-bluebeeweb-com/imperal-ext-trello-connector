@@ -649,6 +649,31 @@ async def get_token_link(ctx, params: GetTokenLinkParams) -> ActionResult:
         "token.")
 
 
+def _describe_account(entry: dict) -> str:
+    """Name one connected account for a human.
+
+    THE USERNAME IS A NAME. Trello leaves `fullName` empty on plenty of
+    accounts, and the previous version fell straight through to the literal
+    "unnamed" -- so a perfectly healthy connection reported itself as
+    "Connected as unnamed (@ivancovlad)". Seen in a live check_access, and on a
+    tool whose entire job is telling the user whether things are ALRIGHT,
+    reading as broken is the one failure mode that matters.
+
+    So: the full name when Trello gives one, the username when it does not, and
+    "unnamed" only when the account truly has neither -- where it is honest
+    rather than alarming.
+    """
+    full_name = str(entry.get("account_name") or "").strip()
+    username = str(entry.get("username") or "").strip()
+    if full_name and username:
+        return f"{full_name} (@{username})"
+    if full_name:
+        return full_name
+    if username:
+        return f"@{username}"
+    return "unnamed"
+
+
 @chat.function(
     "check_access",
     "Report what this connector can currently reach in Trello, and explain "
@@ -684,10 +709,7 @@ async def check_access(ctx, params: CheckAccessParams) -> ActionResult:
     boards = await acct.list_boards(ctx, refresh=True)
     board_count = len(boards) if isinstance(boards, list) else 0
 
-    names = ", ".join(
-        f"{e.get('account_name') or 'unnamed'}"
-        f"{' (@' + e['username'] + ')' if e.get('username') else ''}"
-        for e in working) or "none"
+    names = ", ".join(_describe_account(e) for e in working) or "none"
 
     if not working:
         detail = ("Credentials are stored but none of them work right now. "
