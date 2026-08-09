@@ -11,7 +11,7 @@ That is not hypothetical. Live calls failed with
     cannot import name 'TrelloList' from 'models'
         (/opt/extensions/automations/models.py)
     cannot import name 'TrelloCard' from 'models'
-        (/opt/extensions/wp-site-connector-extension/models.py)
+        (/opt/extensions/wordpress-hub-extension/models.py)
 
 -- two DIFFERENT strangers, which is what made it intermittent: whichever app's
 module happened to be cached in that worker won. `list_labels` kept working

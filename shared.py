@@ -23,7 +23,7 @@ from models import TrelloBoard, TrelloCard, TrelloList
 # evaluated at CALL time resolves against whatever `models` module already sits
 # in the interpreter's cache -- another extension's `models.py`. The failure was
 # intermittent and blamed a stranger: "cannot import name 'TrelloCard' from
-# 'models' (/opt/extensions/wp-site-connector-extension/models.py)". Resolving
+# 'models' (/opt/extensions/wordpress-hub-extension/models.py)". Resolving
 # the name at IMPORT time, while this app's own path is what loaded it, is what
 # makes the binding ours.
 
