@@ -332,9 +332,6 @@ class UpdateBoardParams(BaseModel):
 class DeleteBoardParams(BaseModel):
     """Deleting a board is permanent -- so the name is required, never inferred."""
     board: str = Field(..., description="Board to delete permanently (name or id)")
-    confirm: bool = Field(
-        False, description="Must be true. Deleting a board destroys every list, "
-                           "card and comment on it, and Trello offers no undo.")
 
 
 class BoardMemberParams(BaseModel):

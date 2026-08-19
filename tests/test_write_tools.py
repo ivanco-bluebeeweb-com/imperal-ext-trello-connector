@@ -519,20 +519,18 @@ async def test_delete_label_warns_it_leaves_every_card(connected_ctx, http):
 
 # --- boards -----------------------------------------------------------------
 
-async def test_delete_board_requires_confirmation(connected_ctx, http):
-    """Without confirm=true, nothing is sent at all.
-
-    A board deletion destroys every list, card and comment on it and Trello
-    offers no undo. The gate must fire BEFORE any request, so a mistyped board
-    name cannot even begin.
+async def test_delete_board_calls_delete_and_drops_cache(connected_ctx, http):
+    """delete_board is action_type=destructive -- the platform's own
+    confirmation card gates it, so the handler runs the deletion directly.
     """
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push({})
     result = await hw.delete_board(connected_ctx, DeleteBoardParams(
-        board="Client Work", confirm=False))
-    assert succeeded(result) is False
-    # Not one request spent: no lookup, no delete.
-    assert http.calls == []
+        board="Client Work"))
+    assert succeeded(result) is True
     text = text_of_result(result).lower()
-    assert "confirm" in text
+    assert "permanently" in text or "card" in text
 
 
 async def test_update_board_refuses_an_empty_change(connected_ctx, http):
@@ -1176,7 +1174,7 @@ async def test_deleting_a_board_drops_the_cache(
     http.push([board_payload()])
     http.push({})
     result = await hw.delete_board(connected_ctx, DeleteBoardParams(
-        board="Client Work", confirm=True))
+        board="Client Work"))
     assert succeeded(result) is True
     assert dropped
 

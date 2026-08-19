@@ -1630,7 +1630,7 @@ async def update_board(ctx, params: UpdateBoardParams) -> ActionResult:
 @chat.function(
     "delete_board",
     "Permanently delete a Trello board and everything on it. Cannot be undone.",
-    action_type="write", chain_callable=True,
+    action_type="destructive", chain_callable=True,
     data_model=WriteResult,
     event="trello-connector.delete_board",
     effects=["trello.board.deleted"],
@@ -1638,20 +1638,14 @@ async def update_board(ctx, params: UpdateBoardParams) -> ActionResult:
 async def delete_board(ctx, params: DeleteBoardParams) -> ActionResult:
     """Delete a board permanently.
 
-    Gated on an explicit `confirm`, unlike `delete_card`: a card is one item,
-    while a board takes every list, card, comment and attachment on it, and
-    Trello has no undo and no trash for boards. Closing (`update_board` with
-    closed=true) does what most people mean and is reversible, so the refusal
-    below names it.
+    action_type="destructive", not "write": a board takes every list, card,
+    comment and attachment on it with it, and Trello has no undo and no
+    trash for boards. That classification is what makes the kernel's own
+    confirmation guard intercept the call, so the gate is declared rather
+    than hand-rolled (a hand-rolled confirm field here would double-prompt).
+    To hide a board reversibly instead, close it: update_board with
+    closed=true.
     """
-    if not params.confirm:
-        return _error(
-            "Deleting a board is permanent -- every list, card, comment and "
-            "attachment on it goes too, and Trello offers no undo. Pass "
-            "confirm=true if that is really the intent. To hide a board "
-            "reversibly instead, close it: update_board with closed=true.",
-            tc.TRELLO_VALIDATION_FAILED)
-
     picked = await acct.resolve_board(ctx, params.board)
     if not picked.get("ok"):
         return _from_envelope(picked)
