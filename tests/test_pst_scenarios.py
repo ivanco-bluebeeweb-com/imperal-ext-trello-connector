@@ -310,3 +310,72 @@ async def test_error_list_workspaces_without_credentials(ctx, http):
     result = await hr.list_workspaces(ctx, hr.ListWorkspacesParams())
     assert result.status == "error"
     assert not http.calls
+
+
+# ── Part D2 (SCENARIO_TESTING_STANDARD.md): idempotency / double-invocation ─
+
+async def test_d2_double_delete_card_second_call_fails_clean(connected_ctx, http):
+    """delete_card resolves the card by name via shared.resolve_card before
+    calling DELETE. On a retried delete after the card is already gone,
+    resolve_card's own board-scan finds no matching card and must surface a
+    clean error -- never crash, and never report a confusing second
+    successful deletion (Trello's own delete is genuinely permanent, so a
+    silent false-success here would be actively misleading)."""
+    from conftest import board_payload, card_payload
+
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push({})
+    first = await hw.delete_card(connected_ctx, hw.DeleteCardParams(card="Fix hero"))
+    assert first.status == "success", first.error
+
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([])  # card no longer on the board -- already deleted
+    second = await hw.delete_card(connected_ctx, hw.DeleteCardParams(card="Fix hero"))
+    assert second.status == "error"
+
+
+# ── Part D3 (SCENARIO_TESTING_STANDARD.md): security / SSRF surface -------
+
+async def test_d3_add_attachment_url_is_outbound_data_not_a_fetch_target(
+        connected_ctx, http):
+    """add_attachment's url is sent AS a query parameter TO Trello's own API
+    (api.trello.com/.../attachments?url=...) -- Trello itself may later
+    fetch a preview of that link, but THIS connector never dereferences it.
+    Regression trip-wire: confirms the url only ever appears in the outgoing
+    request's params, never as a request target this app's own http client
+    connects to."""
+    from conftest import board_payload, card_payload
+
+    http.push(member_payload())
+    http.push([board_payload()])
+    http.push([card_payload(name="Fix hero")])
+    http.push({"id": "A1", "url": "https://example.dev/brief.pdf"})
+    result = await hw.add_attachment(connected_ctx, hw.AddAttachmentParams(
+        card="Fix hero", url="https://example.dev/brief.pdf", name="Brief"))
+    assert result.status == "success", result.error
+
+    for call in http.calls:
+        assert "example.dev" not in call["url"], (
+            "the attachment url must never become this app's own request URL")
+    assert http.last_params().get("url") == "https://example.dev/brief.pdf"
+
+
+def test_d3_no_ssrf_only_fixed_trello_hosts_in_source():
+    """Regression trip-wire on the source itself: every ctx.http.* call in
+    this app's own code must target a fixed api.trello.com/trello.com host
+    (built from the TRELLO_API constant or the hardcoded authorize URL in
+    accounts.py), never a raw variable holding a user-supplied URL."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for path in root.glob("*.py"):
+        text = path.read_text()
+        for line in text.splitlines():
+            if "ctx.http." in line or "self.http." in line:
+                assert "trello.com" in text or "TRELLO_API" in text, (
+                    f"{path.name}: found an http call without a fixed "
+                    "trello.com/TRELLO_API host anywhere in the file"
+                )
