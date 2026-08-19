@@ -920,8 +920,9 @@ async def list_stickers(ctx, params: ListAttachmentsParams) -> ActionResult:
 )
 async def list_workspaces(ctx, params: ListWorkspacesParams) -> ActionResult:
     """List workspaces (organizations, in API terms)."""
-    creds, _board, err = await _resolve(ctx, "")
-    if err and not creds:
+    # Not board-scoped (see create_workspace's own comment for why any_credentials is used instead of the board resolver here).
+    creds, err = await shared.any_credentials(ctx)
+    if err:
         return err
 
     out = await tc.request(
@@ -1015,8 +1016,9 @@ async def list_activity(ctx, params: ListActivityParams) -> ActionResult:
 )
 async def list_notifications(ctx, params: ListNotificationsParams) -> ActionResult:
     """Read notifications for the connected account."""
-    creds, _board, err = await _resolve(ctx, "")
-    if err and not creds:
+    # Not board-scoped (see create_workspace's own comment for why any_credentials is used instead of the board resolver here).
+    creds, err = await shared.any_credentials(ctx)
+    if err:
         return err
 
     limit = max(1, min(int(params.limit or 20), 50))

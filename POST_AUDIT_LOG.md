@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-08-19 — Plausible Scenario Testing (PST) — реальный баг найден и исправлен
+
+Полный метод и детали — в `SCENARIO_TESTS.md` этого приложения. Кратко:
+из 62 функций и 7 файлов существующих тестов 11 функций
+(`archive_list`, `create_board`, `create_checklist`, `create_workspace`,
+`list_activity`, `list_attachments`, `list_custom_fields`,
+`list_notifications`, `list_stickers`, `list_workspaces`,
+`set_check_item`) никогда не тестировались напрямую — закрыты 23
+новыми тестами в `tests/test_pst_scenarios.py`.
+
+**Найден и исправлен реальный баг кода приложения:** 6 функций
+(`create_workspace`, `update_workspace`, `set_workspace_member`,
+`delete_workspace`, `list_workspaces`, `list_notifications`) — ни одна
+из них не работает с доской — ошибочно требовали полного резолва
+доски (`shared.resolve(ctx, "")`) вместо правильного
+`shared.any_credentials(ctx)`. Следствие: аккаунт с рабочим токеном,
+но без единой открытой доски, получал ложную ошибку "no open Trello
+boards" при операциях с воркспейсами/уведомлениями, которые к доскам
+не имеют отношения. Плюс сопутствующий мёртвый код: проверка
+`if err and not creds` никогда не могла сработать (`creds` при ошибке
+`resolve()` — непустой tuple `("", "")`, всегда truthy в Python).
+Исправлено во всех 6 местах на `any_credentials`; 3 существующих
+write-теста, чьи HTTP-заглушки компенсировали баг, приведены в
+соответствие с исправленным поведением. Полный набор (234/234) зелёный.
+Публикуется по правилу двойной публикации (код приложения менялся):
+git commit + push, затем `developer.deploy_app`.
+
+---
+
 ## 2026-08-19 — Сквозной пост-аудит + исправление double-prompt бага в delete_board
 
 **Что проверялось:** py_compile всех 10 модулей; количество `@chat.function`

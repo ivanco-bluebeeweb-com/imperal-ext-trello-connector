@@ -2298,8 +2298,9 @@ async def set_vote(ctx, params: VoteParams) -> ActionResult:
 )
 async def create_workspace(ctx, params: CreateWorkspaceParams) -> ActionResult:
     """Create a workspace (an organization, in API terms)."""
-    creds, _board, err = await _resolve(ctx, "")
-    if err and not creds:
+    # Not board-scoped (see create_workspace's own comment for why any_credentials is used instead of the board resolver here).
+    creds, err = await shared.any_credentials(ctx)
+    if err:
         return err
 
     body = {"displayName": params.name}
@@ -2377,8 +2378,9 @@ async def update_workspace(ctx, params: UpdateWorkspaceParams) -> ActionResult:
         return _error("Nothing to change: give a new name, description or "
                       "website.", tc.TRELLO_VALIDATION_FAILED)
 
-    creds, _board, err = await _resolve(ctx, "")
-    if err and not creds:
+    # Not board-scoped (see create_workspace's own comment for why any_credentials is used instead of the board resolver here).
+    creds, err = await shared.any_credentials(ctx)
+    if err:
         return err
 
     target = await shared.resolve_workspace(ctx, creds, params.workspace)
@@ -2415,8 +2417,9 @@ async def set_workspace_member(ctx, params: WorkspaceMemberParams) -> ActionResu
     keeps board membership separate -- so the result says so, because "removed"
     otherwise implies an access revocation that has not happened.
     """
-    creds, _board, err = await _resolve(ctx, "")
-    if err and not creds:
+    # Not board-scoped (see create_workspace's own comment for why any_credentials is used instead of the board resolver here).
+    creds, err = await shared.any_credentials(ctx)
+    if err:
         return err
 
     target = await shared.resolve_workspace(ctx, creds, params.workspace)
@@ -2503,8 +2506,9 @@ async def delete_workspace(ctx, params: DeleteWorkspaceParams) -> ActionResult:
             "confirm=true if that is really the intent.",
             tc.TRELLO_VALIDATION_FAILED)
 
-    creds, _board, err = await _resolve(ctx, "")
-    if err and not creds:
+    # Not board-scoped (see create_workspace's own comment for why any_credentials is used instead of the board resolver here).
+    creds, err = await shared.any_credentials(ctx)
+    if err:
         return err
 
     target = await shared.resolve_workspace(ctx, creds, params.workspace)

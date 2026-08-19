@@ -878,9 +878,10 @@ async def test_removing_a_workspace_member_says_boards_are_unchanged(
 
     Reporting a bare "removed" would imply an access revocation that has not
     happened -- the person still reaches every board they were on.
+
+    Not board-scoped: set_workspace_member uses any_credentials (zero HTTP
+    calls of its own, unlike the board resolver) before resolve_workspace.
     """
-    http.push(member_payload())
-    http.push([board_payload()])
     http.push([workspace_payload()])                 # resolve_workspace
     http.push([{"id": "m9" + "3" * 22, "fullName": "Sam Ray",
                 "username": "samray"}])
@@ -969,13 +970,10 @@ async def test_vote_uses_the_membersVoted_route(connected_ctx, http):
 async def test_removing_a_workspace_member_is_not_a_deactivation(
         connected_ctx, http):
     """Trello has two different removals; this tool must use the plain one."""
-    # Call order, TRACED not assumed: GET members/me, GET members/me/boards
-    # (both from the credential resolve), GET members/me/organizations to
-    # resolve the workspace, GET its members to turn a name into an id, DELETE.
-    # Queuing one payload for the credential step left everything after it
-    # reading the wrong response.
-    http.push(member_payload())
-    http.push([board_payload()])
+    # Call order, TRACED not assumed: GET members/me/organizations to resolve
+    # the workspace, GET its members to turn a name into an id, DELETE.
+    # Not board-scoped, so any_credentials (zero HTTP calls) picks the
+    # credential -- there is no separate credential-resolve request to queue.
     http.push([workspace_payload()])
     http.push([{"id": "9c" + "7" * 22, "fullName": "Teammate",
                 "username": "teammate"}])
@@ -1206,9 +1204,10 @@ async def test_workspace_description_can_be_cleared(connected_ctx, http):
     to change the description at all. The guard correctly refused it as an empty
     change, which left no way to empty the field. An explicit flag is the only
     thing that can carry the difference.
+
+    Not board-scoped: update_workspace uses any_credentials (zero HTTP calls
+    of its own) before resolve_workspace.
     """
-    http.push(member_payload())
-    http.push([board_payload()])
     http.push([{"id": "ws" + "9" * 22, "displayName": "Studio"}])
     http.push({"id": "ws" + "9" * 22, "displayName": "Studio"})
     result = await hw.update_workspace(connected_ctx, UpdateWorkspaceParams(
